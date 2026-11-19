@@ -60,7 +60,8 @@ def setup(monkeypatch, tmp_path):
     return runner, calls
 
 
-def test_structured_uses_chosen_model_and_sandbox_and_audits_usage(setup, monkeypatch):
+@pytest.mark.parametrize("fast_default", [False, True])
+def test_structured_uses_chosen_model_and_sandbox_and_audits_usage(setup, monkeypatch, fast_default):
     runner, logins = setup
 
     class Process:
@@ -69,7 +70,12 @@ def test_structured_uses_chosen_model_and_sandbox_and_audits_usage(setup, monkey
         def __init__(self, command, **options):
             assert command[0] == str(runner)
             assert command[1:4] == ["-a", "never", "exec"]
-            assert command[command.index("--model") + 1] == "gpt-6-astra"
+            if fast_default:
+                assert "--model" not in command
+                assert 'service_tier="fast"' in command and "features.fast_mode=true" in command
+            else:
+                assert command[command.index("--model") + 1] == "gpt-6-astra"
+                assert 'service_tier="fast"' not in command
             assert 'model_reasoning_effort="medium"' in command
             assert command[command.index("--sandbox") + 1] == "read-only"
             assert command[command.index("--disable") + 1] == "shell_tool"
@@ -96,7 +102,8 @@ def test_structured_uses_chosen_model_and_sandbox_and_audits_usage(setup, monkey
 
     monkeypatch.setattr(codex.subprocess, "Popen", Process)
     store = FakeStore()
-    client = codex.CodexModelClient(LLMConfig(), store, "first", backend="astra-medium", runner=runner)
+    client = codex.CodexModelClient(LLMConfig(), store, "first", backend="astra-medium", runner=runner,
+                                    choice=("", "medium", True, True) if fast_default else None)
     result = client.structured("日报正文", Record, "Analyze daily report", images=[b"example-png"])
     assert result == Record(title="可靠标题", source=2)
     assert client.config.model_dump(mode="json")["api_key_env"] is None
@@ -107,7 +114,9 @@ def test_structured_uses_chosen_model_and_sandbox_and_audits_usage(setup, monkey
     assert "OPENAI_API_KEY" not in logins[0][1]["env"]
     run_id, audit = store.rows[0]
     assert run_id == "first"
-    assert audit["request_model"] == "gpt-6-astra" and audit["reasoning_effort"] == "medium"
+    assert audit["request_model"] == (codex.CODEX_DEFAULT if fast_default else "gpt-6-astra")
+    assert audit["reasoning_effort"] == "medium"
+    assert audit.get("requested_service_tier") == ("fast" if fast_default else None)
     assert audit["status"] == "ok" and audit["auth"] == "same_host_chatgpt"
     assert "日报正文" not in json.dumps(audit, ensure_ascii=False)
     assert "可靠标题" not in json.dumps(audit, ensure_ascii=False)

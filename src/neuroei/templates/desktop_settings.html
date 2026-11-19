@@ -23,6 +23,11 @@ button.primary{background:var(--accent);color:white;border-color:var(--accent)}b
         <select id="backend"><option value="sol-high">Codex</option><option value="deepseek">DeepSeek</option></select>
     </label>
     <p id="codex-status" role="status">正在读取 Codex 状态…</p>
+    <div id="codex-account" hidden>
+        <p>当前 Codex 账号 <strong id="codex-account-name" style="overflow-wrap:anywhere"></strong></p>
+        <p id="codex-quota-five"></p>
+        <p id="codex-quota-week"></p>
+    </div>
     <div class="actions">
         <button type="button" id="codex-login" disabled>登录 Codex</button>
         <button type="button" id="refresh-codex" disabled>刷新模型列表</button>
@@ -33,6 +38,8 @@ button.primary{background:var(--accent);color:white;border-color:var(--accent)}b
         <select id="codex-model"></select>
         <label for="codex-effort">推理强度</label>
         <select id="codex-effort"></select>
+        <label for="codex-speed">响应速度</label>
+        <select id="codex-speed"></select>
     </div>
     <label>DeepSeek API Key
         <input id="deepseek-key" type="password" maxlength="512" autocomplete="off">
@@ -60,6 +67,7 @@ const notice = node('notice');
 const primary = form.querySelector('[type=submit]');
 const codexModel = node('codex-model');
 const codexEffort = node('codex-effort');
+const codexSpeed = node('codex-speed');
 const codexStatus = node('codex-status');
 const codexLogin = node('codex-login');
 const refreshCodex = node('refresh-codex');
@@ -95,16 +103,29 @@ function render(state) {
             ? '已内置 Docling。要使用论文推荐和深读，请双击「安装 BGE-M3」并在安装后重启研究台。'
             : '未找到内置的 Docling，请完整解压研究台安装包。';
 }
-function chooseEfforts(effort) {
-    const model = catalog?.models.find(item => item.id === codexModel.value);
+function chooseCodexOptions(effort, fast) {
+    const model = catalog?.models.find(item => codexModel.value
+        ? item.id === codexModel.value : item.is_default);
     const labels = {none:'无', minimal:'极低', low:'低', medium:'中', high:'高',
-        xhigh:'很高', max:'最高', ultra:'极高'};
+        xhigh:'很高', max:'超高', ultra:'极高'};
     const options = model?.efforts || [];
-    codexEffort.replaceChildren(...options.map(item => new Option(labels[item] || item, item)));
+    codexEffort.replaceChildren(new Option('跟随模型默认值', ''),
+        ...options.map(item => new Option(labels[item] ? labels[item] + '（' + item + '）' : item, item)));
     codexEffort.disabled = !options.length;
-    if (!options.length) codexEffort.add(new Option('跟随模型默认值', ''));
-    codexEffort.value = options.includes(effort) ? effort : model?.default_effort || options[0] || '';
-    if (options.length && !codexEffort.value) codexEffort.selectedIndex = 0;
+    codexEffort.value = options.includes(effort) ? effort : '';
+    codexSpeed.replaceChildren(new Option('标准', 'standard'));
+    if (model?.supports_fast) codexSpeed.add(new Option('Fast · 额度消耗更高', 'fast'));
+    codexSpeed.disabled = !model?.supports_fast;
+    codexSpeed.value = fast && model?.supports_fast ? 'fast' : 'standard';
+}
+function quotaText(label, window) {
+    if (!window) return label + '额度暂未获取';
+    const reset = window.resets_at && new Date(window.resets_at * 1000);
+    const resetText = reset && Number.isFinite(reset.getTime())
+        ? ' · 北京时间 ' + new Intl.DateTimeFormat('zh-CN', {
+            timeZone:'Asia/Shanghai', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false
+        }).format(reset) + ' 重置' : '';
+    return label + '额度剩余 ' + window.remaining_percent + '%' + resetText;
 }
 async function loadCatalog() {
     if (readingCatalog) return;
@@ -112,17 +133,29 @@ async function loadCatalog() {
     refreshCodex.disabled = true;
     codexLogin.disabled = true;
     codexStatus.textContent = '正在读取 Codex 模型列表…';
+    node('codex-account').hidden = true;
     try {
         const beforeModel = codexModel.options.length ? codexModel.value : settings?.codex_model;
         const beforeEffort = codexEffort.options.length ? codexEffort.value : settings?.codex_effort;
+        const beforeFast = codexSpeed.options.length ? codexSpeed.value === 'fast' : settings?.codex_fast;
         catalog = await request('/api/desktop/codex/models');
+        if (!Object.hasOwn(catalog, 'account_label') || !Object.hasOwn(catalog, 'quota')) {
+            node('codex-choices').hidden = true;
+            codexStatus.textContent = '研究台后台仍在使用旧版。请完全退出研究台，再双击「启动研究台.cmd」。';
+            return;
+        }
         const {installed, signed_in, models} = catalog;
         const selected = models.find(item => item.id === beforeModel);
         const defaultModel = models.find(item => item.is_default);
         const defaultLabel = defaultModel ? 'Codex 默认模型 · ' + defaultModel.label : 'Codex 默认模型';
         codexModel.replaceChildren(new Option(defaultLabel, ''), ...models.map(item => new Option(item.label, item.id)));
         codexModel.value = selected?.id || '';
-        chooseEfforts(selected?.id === beforeModel ? beforeEffort : null);
+        const sameModel = codexModel.value === (beforeModel || '');
+        chooseCodexOptions(sameModel ? beforeEffort : '', sameModel && beforeFast);
+        node('codex-account-name').textContent = catalog.account_label || '账号名称未返回';
+        node('codex-quota-five').textContent = quotaText('5 小时', catalog.quota?.five_hour);
+        node('codex-quota-week').textContent = quotaText('周', catalog.quota?.weekly);
+        node('codex-account').hidden = !signed_in;
         node('codex-choices').hidden = !models.length;
         node('codex-install').hidden = installed;
         codexLogin.textContent = signed_in ? '重新登录或切换账号' : '登录 Codex';
@@ -140,7 +173,7 @@ async function loadCatalog() {
         codexLogin.disabled = !(catalog?.installed ?? settings?.codex_installed);
     }
 }
-codexModel.addEventListener('change', () => chooseEfforts());
+codexModel.addEventListener('change', () => chooseCodexOptions('', false));
 refreshCodex.onclick = loadCatalog;
 codexLogin.onclick = async () => {
     codexLogin.disabled = true;
@@ -174,6 +207,7 @@ form.onsubmit = event => {
         if (changes.backend === 'sol-high' && catalog?.models.length) {
             changes.codex_model = codexModel.value;
             changes.codex_effort = codexEffort.value;
+            changes.codex_fast = codexSpeed.value === 'fast';
         }
         if (secret.value.trim()) changes.deepseek_api_key = secret.value.trim();
         await save(changes);

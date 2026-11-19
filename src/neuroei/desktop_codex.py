@@ -60,10 +60,33 @@ def _rows(data):
         if default_effort not in efforts:
             default_effort = efforts[0] if efforts else None
         label = row.get('displayName')
+        tiers = row.get('serviceTiers') or ()
+        fast = 'fast' in (row.get('additionalSpeedTiers') or ()) or any(
+            isinstance(tier, dict) and tier.get('id') in ('priority', 'fast') for tier in tiers)
         models[model] = {'id': model, 'label': label.strip()[:120] if isinstance(label, str) and label.strip() else model,
                          'efforts': efforts, 'default_effort': default_effort, 'is_default': row.get('isDefault') is True,
-                         'supports_images': 'image' in modalities}
+                         'supports_images': 'image' in modalities, 'supports_fast': fast}
     return list(models.values())
+
+
+def _quota(result):
+    buckets = result.get('rateLimitsByLimitId')
+    codex = buckets.get('codex') if isinstance(buckets, dict) else None
+    snapshot = codex if isinstance(codex, dict) else result.get('rateLimits')
+    if not isinstance(snapshot, dict):
+        return {}
+    windows = {}
+    for key in ('primary', 'secondary'):
+        window = snapshot.get(key)
+        if not isinstance(window, dict):
+            continue
+        name = {300: 'five_hour', 10080: 'weekly'}.get(window.get('windowDurationMins'))
+        used = window.get('usedPercent')
+        if name and type(used) in (int, float) and 0 <= used <= 100:
+            reset = window.get('resetsAt')
+            windows[name] = {'remaining_percent': round(100 - used, 1),
+                             'resets_at': reset if type(reset) is int and reset > 0 else None}
+    return windows
 
 
 def _read_catalog(runner):
@@ -104,43 +127,55 @@ def _read_catalog(runner):
             current = send('account/read', {'refreshToken': False})
             account = current.get('account')
             if not isinstance(account, dict) or account.get('type') != 'chatgpt':
-                return False, []
+                return {'signed_in': False}
+            label = next((value.strip()[:254] for key in ('displayName', 'name', 'email')
+                          if isinstance(value := account.get(key), str) and value.strip()), '')
             data = []
             params = {'limit': 100, 'includeHidden': False}
-            while True:
-                page = send('model/list', params)
-                rows = page.get('data')
-                if not isinstance(rows, list):
-                    raise ValueError('Codex 模型列表格式无效。')
-                data.extend(rows)
-                cursor = page.get('nextCursor')
-                if not cursor:
-                    return True, _rows(data)
-                if not isinstance(cursor, str) or cursor == params.get('cursor'):
-                    raise ValueError('Codex 模型列表分页无效。')
-                params['cursor'] = cursor
+            state = {'signed_in': True, 'account_label': label}
+            try:
+                while True:
+                    page = send('model/list', params)
+                    rows = page.get('data')
+                    if not isinstance(rows, list):
+                        raise ValueError('Codex 模型列表格式无效。')
+                    data.extend(rows)
+                    cursor = page.get('nextCursor')
+                    if not cursor:
+                        state['models'] = _rows(data)
+                        break
+                    if not isinstance(cursor, str) or cursor == params.get('cursor'):
+                        raise ValueError('Codex 模型列表分页无效。')
+                    params['cursor'] = cursor
+            except (Empty, OSError, ValueError):
+                pass
+            try:
+                state['quota'] = _quota(send('account/rateLimits/read', {}))
+            except (Empty, OSError, ValueError):
+                pass
+            return state
         finally:
             _stop(process)
             reader.join(timeout=3)
 
 
 def catalog(runner: Path | None) -> dict:
-    """Return the authenticated provider's model picker without account identifiers."""
+    """Return the local account label, model choices and Codex quota windows."""
     installed = runner is not None and runner.is_absolute() and runner.is_file()
-    state = {'installed': installed, 'signed_in': False, 'models': []}
+    state = {'installed': installed, 'signed_in': False, 'account_label': '', 'models': [], 'quota': {}}
     if not installed:
         return {**state, 'message': '请先安装 Codex CLI。'}
     try:
-        signed_in, models = _read_catalog(runner)
+        state.update(_read_catalog(runner))
     except (Empty, OSError, ValueError):
         from .codex_model_client import codex_login_ready
 
         if codex_login_ready(runner):
             return {**state, 'signed_in': True, 'message': '已登录 Codex，但暂时无法读取模型列表，请重试。'}
         return {**state, 'message': '暂时无法确认 Codex 登录，请检查网络或更新 Codex CLI。'}
-    message = ('已读取当前账号的 Codex 模型。' if models else
-               '当前账号未返回可选模型。' if signed_in else '请先用 ChatGPT 账号登录 Codex。')
-    return {**state, 'signed_in': signed_in, 'models': models, 'message': message}
+    message = ('已读取当前账号的 Codex 模型。' if state['models'] else
+               '当前账号未返回可选模型。' if state['signed_in'] else '请先用 ChatGPT 账号登录 Codex。')
+    return {**state, 'message': message}
 
 
 def _watch_login(process):

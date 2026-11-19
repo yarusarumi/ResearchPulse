@@ -23,11 +23,15 @@ def codex_portal(tmp_path, monkeypatch):
 
     def catalog(profile):
         assert profile == desktop.profile
-        return {'installed': True, 'signed_in': bool(launch_calls), 'models': [
+        return {'installed': True, 'signed_in': bool(launch_calls),
+                'account_label': f'account-{len(launch_calls)}@example.test' if launch_calls else '',
+                'quota': {'five_hour': {'remaining_percent': 80, 'resets_at': 1795100000},
+                          'weekly': {'remaining_percent': 62.5, 'resets_at': None}},
+                'models': [
             {'id': 'example-standard', 'label': 'Standard fixture', 'efforts': ['low', 'medium'],
-             'default_effort': 'low', 'is_default': True, 'supports_images': False},
+             'default_effort': 'low', 'is_default': True, 'supports_images': False, 'supports_fast': True},
             {'id': 'example-strong', 'label': 'Strong fixture', 'efforts': ['medium', 'high'],
-             'default_effort': 'medium', 'is_default': False, 'supports_images': True},
+             'default_effort': 'medium', 'is_default': False, 'supports_images': True, 'supports_fast': False},
         ] if launch_calls else []}
 
     def login(profile):
@@ -100,6 +104,7 @@ def test_codex_login_and_model_picker_in_edge(codex_portal):
     result = subprocess.run(['node', str(script), browser_url], capture_output=True, text=True,
                             encoding='utf-8', errors='replace', timeout=70)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert [entry['codex_model'] for entry in saves] == ['example-strong', '']
-    assert [entry['codex_effort'] for entry in saves] == ['high', '']
+    assert [entry['codex_effort'] for entry in saves] == ['high', 'medium']
+    assert [entry['codex_fast'] for entry in saves] == [False, True]

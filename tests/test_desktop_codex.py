@@ -27,12 +27,14 @@ for line in sys.stdin:
         assert 'id' not in request
     elif method == 'account/read':
         assert not params['refreshToken']
-        reply(request, {'account': {'type': 'chatgpt', 'email': 'private@example.test'}})
+        reply(request, {'account': {'type': 'chatgpt', 'email': 'fixture@example.test',
+                                    'credential': 'never-forward-this'}})
     elif method == 'model/list':
         assert params['includeHidden'] is False
         if 'cursor' not in params:
             data = [{'id': 'sku', 'model': 'example-main', 'displayName': 'Example',
                      'isDefault': True, 'inputModalities': ['text', 'image'],
+                     'serviceTiers': [{'id': 'priority'}],
                      'supportedReasoningEfforts': [{'reasoningEffort': 'medium'},
                                                    {'reasoningEffort': 'xhigh'}],
                      'defaultReasoningEffort': 'xhigh'}]
@@ -44,6 +46,10 @@ for line in sys.stdin:
                     {'model': 'audio-only', 'inputModalities': ['audio']},
                     {'model': '--option'}]
             reply(request, {'data': data, 'nextCursor': None})
+    elif method == 'account/rateLimits/read':
+        reply(request, {'accountId': 'never-forward-this', 'rateLimitsByLimitId': {
+            'codex': {'primary': {'windowDurationMins': 300, 'usedPercent': 20, 'resetsAt': 1795100000},
+                      'secondary': {'windowDurationMins': 10080, 'usedPercent': 37.5}}}})
 """,
         encoding='utf-8',
     )
@@ -58,11 +64,14 @@ for line in sys.stdin:
     assert result['installed'] and result['signed_in']
     assert result['models'] == [
         {'id': 'example-main', 'label': 'Example', 'efforts': ['medium', 'xhigh'],
-         'default_effort': 'xhigh', 'is_default': True, 'supports_images': True},
+         'default_effort': 'xhigh', 'is_default': True, 'supports_images': True, 'supports_fast': True},
         {'id': 'example-secondary', 'label': 'example-secondary', 'efforts': [],
-         'default_effort': None, 'is_default': False, 'supports_images': False},
+         'default_effort': None, 'is_default': False, 'supports_images': False, 'supports_fast': False},
     ]
-    assert 'private@example.test' not in str(result)
+    assert result['account_label'] == 'fixture@example.test'
+    assert result['quota'] == {'five_hour': {'remaining_percent': 80, 'resets_at': 1795100000},
+                               'weekly': {'remaining_percent': 62.5, 'resets_at': None}}
+    assert 'never-forward-this' not in str(result)
     missing = desktop_codex.catalog(None)
     assert missing['models'] == [] and not missing['installed']
 

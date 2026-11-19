@@ -28,6 +28,7 @@ class CodexLLMConfig(LLMConfig):
     model: str = "gpt-6.2-sol"
     api_key_env: None = None
     reasoning_effort: str | None = "high"
+    service_tier: Literal["fast"] | None = None
 
 
 def codex_login_ready(runner: str | Path | None) -> bool:
@@ -138,6 +139,7 @@ def config_for_backend(config, backend, *, choice=None):
     return CodexLLMConfig.model_validate({
         **config.model_dump(), "base_url": "codex-cli", "api_key_env": None,
         "model": model or CODEX_DEFAULT, "reasoning_effort": effort or None,
+        "service_tier": "fast" if choice is not None and choice[3] else None,
     })
 
 
@@ -189,6 +191,8 @@ class CodexModelClient:
                 command.extend(("--model", self.config.model))
             if self.config.reasoning_effort:
                 command.extend(("-c", "model_reasoning_effort=" + json.dumps(self.config.reasoning_effort)))
+            if self.config.service_tier == "fast":
+                command.extend(("-c", 'service_tier="fast"', "-c", "features.fast_mode=true"))
             if schema is not None:
                 schema_path = root / "output-schema.json"
                 schema_path.write_text(json.dumps(schema), encoding="utf-8")
@@ -267,6 +271,8 @@ class CodexModelClient:
                         "timeout_seconds": self.config.timeout_seconds}
                 if schema is not None:
                     meta["output_format"] = "strict_json_schema" if wire_schema is not None else "validated_json"
+                if self.config.service_tier:
+                    meta["requested_service_tier"] = self.config.service_tier
                 try:
                     answer, usage = self._run(formatted, wire_schema, images)
                     self.last_finish_reason, self.last_usage = "stop", usage

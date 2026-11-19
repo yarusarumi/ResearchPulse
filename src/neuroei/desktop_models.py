@@ -101,6 +101,7 @@ class RuntimeModels:
     codex_model: str = ''
     codex_effort: str = ''
     codex_supports_images: bool = True
+    codex_fast: bool = False
 
     def deepseek_key(self) -> str | None:
         return unprotect_secret(self._deepseek_envelope) if self._deepseek_envelope else None
@@ -109,10 +110,10 @@ class RuntimeModels:
         return {'backend': self.backend, 'codex_installed': self.codex_runner is not None,
                 'deepseek_configured': bool(self._deepseek_envelope), 'fallback_enabled': self.fallback_enabled,
                 'codex_model': self.codex_model, 'codex_effort': self.codex_effort,
-                'codex_supports_images': self.codex_supports_images}
+                'codex_supports_images': self.codex_supports_images, 'codex_fast': self.codex_fast}
 
     def codex_choice(self):
-        return self.codex_model, self.codex_effort, self.codex_supports_images
+        return self.codex_model, self.codex_effort, self.codex_supports_images, self.codex_fast
 
 
 def _read(profile: Path) -> dict:
@@ -123,12 +124,13 @@ def _read(profile: Path) -> dict:
     except (UnicodeError, ValueError):
         raise ValueError('本机模型设置无法读取。') from None
     if (not isinstance(settings, dict) or set(settings) - {'backend', 'fallback_enabled', 'deepseek_envelope',
-                                                          'codex_model', 'codex_effort', 'codex_supports_images'}
+                                                          'codex_model', 'codex_effort', 'codex_supports_images', 'codex_fast'}
             or settings.get('backend') not in BACKENDS or type(settings.get('fallback_enabled')) is not bool
             or not isinstance(settings.get('deepseek_envelope'), str)
             or not isinstance(settings.get('codex_model', ''), str)
             or not isinstance(settings.get('codex_effort', ''), str)
-            or type(settings.get('codex_supports_images', True)) is not bool):
+            or type(settings.get('codex_supports_images', True)) is not bool
+            or type(settings.get('codex_fast', False)) is not bool):
         raise ValueError('本机模型设置无法读取。')
     return settings
 
@@ -141,7 +143,7 @@ def runtime(profile: Path) -> RuntimeModels:
     backend = settings.get('backend', 'deepseek' if envelope and not runner else 'sol-high')
     return RuntimeModels(backend, runner, bool(envelope and settings.get('fallback_enabled')), envelope,
                          settings.get('codex_model', ''), settings.get('codex_effort', ''),
-                         settings.get('codex_supports_images', True))
+                         settings.get('codex_supports_images', True), settings.get('codex_fast', False))
 
 
 def load(profile: Path) -> dict:
@@ -171,12 +173,17 @@ def _write(profile: Path, settings: dict) -> None:
         candidate.unlink(missing_ok=True)
 
 
+def _codex_model(profile, model):
+    models = codex_catalog(profile).get('models', [])
+    return next((row for row in models if (row['id'] == model if model else row.get('is_default'))), None)
+
+
 def save(profile: Path, payload: dict) -> dict:
     """Apply only the submitted preferences. Empty secret input preserves the saved credential."""
     if (not isinstance(payload, dict) or set(payload) - {'backend', 'deepseek_api_key', 'remove_deepseek',
-                                                         'fallback_enabled', 'codex_model', 'codex_effort'}):
+                                                         'fallback_enabled', 'codex_model', 'codex_effort', 'codex_fast'}):
         raise ValueError('本机模型设置无效。')
-    for flag in ('remove_deepseek', 'fallback_enabled'):
+    for flag in ('remove_deepseek', 'fallback_enabled', 'codex_fast'):
         if flag in payload and type(payload[flag]) is not bool:
             raise ValueError('本机模型设置无效。')
     new_key = payload.get('deepseek_api_key', '')
@@ -187,23 +194,25 @@ def save(profile: Path, payload: dict) -> dict:
     if (remove_key and new_key) or len(new_key) > 512 or any(not 33 <= ord(c) <= 126 for c in new_key):
         raise ValueError('请输入有效的 DeepSeek API Key。')
     choice = None
-    if set(payload) & {'codex_model', 'codex_effort'}:
+    if set(payload) & {'codex_model', 'codex_effort', 'codex_fast'}:
         if set(payload) & {'codex_model', 'codex_effort'} != {'codex_model', 'codex_effort'}:
             raise ValueError('请选择 Codex 模型和推理强度。')
         model, effort = payload['codex_model'], payload['codex_effort']
-        if (not isinstance(model, str) or len(model) > 128 or not isinstance(effort, str) or len(effort) > 16
-                or (not model and effort)):
+        fast = payload.get('codex_fast', False)
+        if not isinstance(model, str) or len(model) > 128 or not isinstance(effort, str) or len(effort) > 24:
             raise ValueError('请选择有效的 Codex 模型和推理强度。')
-        if model:
-            current_models = codex_catalog(profile).get('models', [])
-            available = next((row for row in current_models if row['id'] == model), None)
+        if model or effort or fast:
+            available = _codex_model(profile, model)
             if not available:
                 raise ValueError('当前 Codex 登录未提供此模型，请刷新模型列表后重新选择。')
             if effort and effort not in available['efforts']:
                 raise ValueError('此模型不支持所选推理强度。')
-            choice = model, effort or (available['default_effort'] or ''), available['supports_images']
+            if fast and not available.get('supports_fast'):
+                raise ValueError('当前 Codex 账号和模型不支持 Fast。')
+            default_effort = available['default_effort'] if model else ''
+            choice = model, effort or default_effort or '', available['supports_images'], fast
         else:
-            choice = '', '', True
+            choice = '', '', True, False
     with _SETTINGS_LOCK:
         previous = _read(profile)
         runner = local_codex_runner()
@@ -218,11 +227,12 @@ def save(profile: Path, payload: dict) -> dict:
             raise ValueError('请先配置 DeepSeek API Key。')
         envelope = '' if remove_key else protect_secret(new_key) if new_key else previous.get('deepseek_envelope', '')
         if choice is None:
-            choice = previous.get('codex_model', ''), previous.get('codex_effort', ''), previous.get('codex_supports_images', True)
+            choice = (previous.get('codex_model', ''), previous.get('codex_effort', ''),
+                      previous.get('codex_supports_images', True), previous.get('codex_fast', False))
         settings = RuntimeModels(backend, runner, bool(has_key and fallback), envelope, *choice)
         _write(profile, {'backend': backend, 'fallback_enabled': settings.fallback_enabled, 'deepseek_envelope': envelope,
                          'codex_model': settings.codex_model, 'codex_effort': settings.codex_effort,
-                         'codex_supports_images': settings.codex_supports_images})
+                         'codex_supports_images': settings.codex_supports_images, 'codex_fast': settings.codex_fast})
         return settings.public_settings()
 
 
@@ -248,10 +258,10 @@ def probe(profile: Path, backend: str) -> dict:
             reason = 'codex_missing'
         else:
             reason = 'ready' if codex_login_ready(settings.codex_runner) else 'codex_login_required'
-            if reason == 'ready' and settings.codex_model:
-                models = codex_catalog(profile).get('models', [])
-                current = next((row for row in models if row['id'] == settings.codex_model), None)
-                if not current or (settings.codex_effort and settings.codex_effort not in current['efforts']):
+            if reason == 'ready' and (settings.codex_model or settings.codex_effort or settings.codex_fast):
+                current = _codex_model(profile, settings.codex_model)
+                if (not current or (settings.codex_effort and settings.codex_effort not in current['efforts'])
+                        or (settings.codex_fast and not current.get('supports_fast'))):
                     reason = 'codex_model_unavailable'
     else:
         reason = _probe_deepseek(settings.deepseek_key())

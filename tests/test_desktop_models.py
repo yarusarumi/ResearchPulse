@@ -34,7 +34,8 @@ def test_deepseek_only_uses_dpapi_key_after_new_process(profile, tmp_path, monke
     assert ai_backend.runner() is None
     saved = desktop_models.save(profile, {'deepseek_api_key': key})
     assert saved == {'backend': 'deepseek', 'codex_installed': False, 'deepseek_configured': True,
-                     'fallback_enabled': False, 'codex_model': '', 'codex_effort': '', 'codex_supports_images': True}
+                     'fallback_enabled': False, 'codex_model': '', 'codex_effort': '', 'codex_supports_images': True,
+                     'codex_fast': False}
     assert key not in (profile / 'model-settings.json').read_text(encoding='utf-8')
     assert key not in json.dumps(saved)
     assert 'DEEPSEEK_API_KEY' not in os.environ
@@ -118,8 +119,8 @@ def test_stays_on_sol_until_next_job_and_only_falls_back_with_consent(profile, t
 
 def test_codex_catalog_choice_reaches_job_and_preserves_image_capability(profile, tmp_path, monkeypatch):
     def model_catalog(_):
-        return {'models': [{'id': 'gpt-6.2-astra', 'efforts': ['medium', 'high'],
-                            'default_effort': 'medium', 'supports_images': False}]}
+        return {'models': [{'id': 'gpt-6.2-astra', 'efforts': ['medium', 'high'], 'is_default': True,
+                            'default_effort': 'medium', 'supports_images': False, 'supports_fast': True}]}
 
     monkeypatch.setattr(desktop_models, 'codex_catalog', model_catalog)
     with pytest.raises(ValueError, match='未提供'):
@@ -139,6 +140,9 @@ def test_codex_catalog_choice_reaches_job_and_preserves_image_capability(profile
             client.close()
         default = ai_backend.model_config(LLMConfig(), ai_backend.selected())
         assert default.model == 'codex-default' and default.reasoning_effort is None
+        desktop_models.save(profile, {'codex_model': '', 'codex_effort': 'high', 'codex_fast': True})
+        configured = ai_backend.model_config(LLMConfig(), ai_backend.selected())
+        assert (configured.model, configured.reasoning_effort, configured.service_tier) == ('codex-default', 'high', 'fast')
     finally:
         store.close()
 
