@@ -7,11 +7,11 @@ ResearchPulse 是面向研究项目的文献工作台。它从科研日报整理
 当前提供 **Windows x64 便携版**，适用于 64 位 Windows 电脑。发布包约 785 MB，自带 Python、Docling 和 CPU 运行组件。[GitHub Releases](https://github.com/yarusarumi/ResearchPulse/releases/latest)
 
 1. 下载发布页中的 Windows x64 ZIP，完整解压到你选择的目录。
-2. 双击 `启动研究台.cmd`。浏览器会打开本机工作台 `http://localhost:8768/`。
+2. 双击 `ResearchPulse.exe`。默认浏览器会打开本机工作台 `http://localhost:8768/`。早期发布包的入口为 `启动研究台.cmd`。
 3. 在右上角打开「模型设置」，接通 Codex 或 DeepSeek。
 4. 首次使用推荐和深读前，联网双击 `安装 BGE-M3.cmd`，下载约 **2.3 GB** 的语义检索权重。完成后重启研究台。
 
-解压到哪里就在哪里运行。项目、历史记录和下载的检索权重存放在解压目录的 `data` 文件夹。升级时，先退出研究台，再将旧版的 `data` 复制到新版目录。更换电脑或 Windows 用户后，需要重新配置被当前用户保护的凭据。
+解压到哪里就在哪里运行。可为 `ResearchPulse.exe` 创建桌面快捷方式，保留解压目录中的运行组件。关闭浏览器标签页后，正在运行的任务仍会在本机继续，再双击 EXE 即可重新打开工作台。项目、历史记录和下载的检索权重存放在解压目录的 `data` 文件夹。升级时，先退出研究台，再将旧版的 `data` 复制到新版目录。更换电脑或 Windows 用户后，需要重新配置被当前用户保护的凭据。
 
 ## 连接模型
 
@@ -58,7 +58,7 @@ ResearchPulse 是面向研究项目的文献工作台。它从科研日报整理
 
 ## 源码和构建
 
-应用位于 `src/neuroei`，Windows 打包脚本位于 `scripts/build_desktop.py`。重新构建完整便携包需要 Windows x64 上的 CPython 3.12、`uv`、已安装的 CPU 阅读组件和固定版本的 PaperFlow wheel。运行下列命令可查看构建参数。PaperFlow 固定版本见 `pyproject.toml`。
+应用位于 `src/neuroei`，Windows 打包脚本位于 `scripts/build_desktop.py`。重新构建完整便携包需要 Windows x64 上的 CPython 3.12、Windows .NET Framework 4.x 自带的 C# 编译器、已安装的 CPU 阅读组件和固定版本的 PaperFlow wheel。安装阅读组件或构建精简包时还需要 `uv`。运行下列命令可查看构建参数。PaperFlow 固定版本见 `pyproject.toml`。
 
 ```powershell
 python deployment/desktop/install_readers.py --help

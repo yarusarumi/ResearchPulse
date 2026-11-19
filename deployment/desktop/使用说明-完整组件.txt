@@ -1,6 +1,7 @@
 ResearchPulse Windows 单机试用版
 
-1. 把 ZIP 完整解压到 Windows 电脑的文档目录或数据盘，然后双击「启动研究台.cmd」。
+1. 把 ZIP 完整解压到 Windows 电脑的文档目录或数据盘，然后双击「ResearchPulse.exe」。
+   默认浏览器会打开本机工作台。可为 EXE 创建桌面快捷方式。
 2. 在右上角「模型设置」接通至少一种模型。Codex 用户先按链接安装 Codex CLI，然后点击
    「登录 Codex」，在 OpenAI 打开的浏览器页面完成登录。回到研究台刷新模型列表，选择账号
    可用的模型与推理强度，或保留 Codex 默认模型。DeepSeek 使用自己的 API Key。

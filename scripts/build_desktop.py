@@ -14,6 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = ROOT / "deployment" / "desktop"
 
 
+def build_launcher(destination: Path) -> None:
+    compiler = Path(os.environ["SystemRoot"]) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
+    if not compiler.is_file():
+        raise SystemExit("The Windows .NET Framework 4.x C# compiler is required to build ResearchPulse.exe.")
+    subprocess.run([
+        str(compiler), "/nologo", "/target:winexe", "/platform:x64", "/codepage:65001",
+        "/reference:System.Windows.Forms.dll", f"/win32icon:{FILES / 'ResearchPulse.ico'}",
+        f"/out:{destination / 'ResearchPulse.exe'}", str(FILES / "ResearchPulseLauncher.cs"),
+    ], check=True)
+
+
 def install_runtime(target: Path, uv: str | None) -> Path:
     source = Path(sys.base_prefix)
     target.mkdir()
@@ -90,7 +101,7 @@ def build(destination: Path, uv: str, layout_only: bool, reader_assets: Path | N
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     common = (
-        ("launch.cmd", "启动研究台.cmd"),
+        ("start_desktop.pyw", "tools/start_desktop.pyw"),
         ("schedule.cmd", "配置每日检查.cmd"),
         ("schedule.ps1", "tools/schedule.ps1"),
         ("start_background.pyw", "tools/start_background.pyw"),
@@ -115,6 +126,7 @@ def build(destination: Path, uv: str, layout_only: bool, reader_assets: Path | N
             path.write_text((FILES / source).read_text(encoding="utf-8-sig"), encoding="utf-8-sig")
         else:
             shutil.copy2(FILES / source, path)
+    build_launcher(destination)
     if reader_assets:
         print("Including Windows CPU dependencies and Docling models", flush=True)
         copy_readers(reader_assets, destination, paperflow_wheel)
