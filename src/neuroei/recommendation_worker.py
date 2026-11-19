@@ -333,8 +333,8 @@ def execute_understanding(store, job, account, *, max_calls, should_stop=None):
                         config = image_client.config
                         image_options.update(sol_policy=f'codex-transcript-v1:{config.model}:{config.reasoning_effort}',
                                              sol_section=CODEX_SECTION)
-            image_options['on_image_progress'] = lambda done, total: save_job_progress(
-                store, job, 'reading_journal_images', None, done=done, total=total)
+            image_options['on_image_progress'] = lambda done, total, reused, document: save_job_progress(
+                store, job, 'reading_journal_images', None, done=done, total=total, reused=reused, document=document)
             if snapshot.get('analysis_mode') == 'daily':
                 image_options['image_day'] = datetime.fromisoformat(analysis_as_of).astimezone(TZ).date() - timedelta(days=1)
         try:

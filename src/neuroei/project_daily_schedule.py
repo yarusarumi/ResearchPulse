@@ -15,11 +15,12 @@ TZ = ZoneInfo("Asia/Shanghai")
 
 
 def run(store, *, submit=True, as_of=None, project_id=None, email=True):
+    """Use project mail preferences in the desktop scheduler (email=None)."""
     stamp = as_of or now()
     rows = []
     from .project_daily_email import retry_pending
 
-    email_retries = retry_pending(store) if email and submit and project_id is None else []
+    email_retries = retry_pending(store) if email is not False and submit and project_id is None else []
     for project in store.list("research_project"):
         automation = project.get("automation") or {}
         if project_id is not None and project["project_id"] != project_id:
@@ -59,7 +60,7 @@ def run(store, *, submit=True, as_of=None, project_id=None, email=True):
                 "project_id": project["project_id"],
                 "analysis_mode": "daily",
                 "auto_dispatch": True,
-                "auto_email": email,
+                "auto_email": bool(automation.get("email_enabled")) and project_id is None if email is None else email,
             }, as_of=stamp, scheduled_project_daily=project_id is None)
             row.update(action="project_understanding", job_id=job["job_id"], status=job["status"])
         except (ValueError, PermissionError) as exc:

@@ -654,7 +654,7 @@ def make_server(store, port=8768, *, legacy_execution_enabled=True, desktop=None
                         home = Path(__file__).with_name('templates').joinpath('recommendations.html').read_text(encoding='utf-8')
                         account_links = ''
                         if desktop:
-                            account_links += '<a href="/desktop/settings">模型设置</a>'
+                            account_links += '<a href="/desktop/settings">模型设置</a><a href="/desktop/mail">邮件设置</a>'
                             home = home.replace('>退出登录</button>', '>锁定研究台</button>')
                             home = home.replace('的完整 HTTPS 回调地址', '的完整本机回调地址')
                         if mailer:
@@ -666,7 +666,7 @@ def make_server(store, port=8768, *, legacy_execution_enabled=True, desktop=None
                         self.reply(200, home.replace('__TOKEN__', token), 'text/html; charset=utf-8')
                     return
                 if account is None:
-                    if desktop and parsed.path == '/desktop/settings':
+                    if desktop and parsed.path in ('/desktop/settings', '/desktop/mail'):
                         self.redirect('/login')
                         return
                     self.unauthorized()
@@ -675,6 +675,13 @@ def make_server(store, port=8768, *, legacy_execution_enabled=True, desktop=None
                 if desktop and parsed.path == '/desktop/settings':
                     settings = files('neuroei').joinpath('templates/desktop_settings.html').read_text(encoding='utf-8')
                     self.reply(200, settings.replace('__TOKEN__', token), 'text/html; charset=utf-8')
+                elif desktop and parsed.path == '/desktop/mail':
+                    settings = files('neuroei').joinpath('templates/desktop_mail.html').read_text(encoding='utf-8')
+                    self.reply(200, settings.replace('__TOKEN__', token), 'text/html; charset=utf-8')
+                elif desktop and parsed.path == '/api/desktop/mail':
+                    from .desktop_mail import settings
+
+                    self.reply(200, settings(desktop.profile))
                 elif desktop and parsed.path == '/api/desktop/models':
                     self.reply(200, {**desktop.model_settings(), 'docling_installed': desktop.docling_paths() is not None,
                                      'reader_installed': desktop.reader_paths() is not None})
@@ -966,7 +973,7 @@ def make_server(store, port=8768, *, legacy_execution_enabled=True, desktop=None
                                  '/api/research-project-feishu', '/api/research-project-automation', '/api/research-project-brief', '/api/feishu-oauth/start', '/api/feishu-oauth/disconnect',
                                  '/api/admin/account', '/api/admin/password', '/api/admin/status', '/api/admin/access',
                                  '/api/admin/model-backend', '/api/desktop/models', '/api/desktop/models/test',
-                                 '/api/desktop/codex/login'):
+                                 '/api/desktop/codex/login', '/api/desktop/mail', '/api/desktop/mail/test'):
                 self.reject_post(404, 'Unknown review action')
                 return
             if self.path == '/api/direction-run' and not legacy_execution_enabled:
@@ -1007,6 +1014,20 @@ def make_server(store, port=8768, *, legacy_execution_enabled=True, desktop=None
                             result = desktop_models.probe(desktop.profile, body['backend'])
                         else:
                             result = desktop_models.save(desktop.profile, body)
+                    except ValueError as exc:
+                        self.reply(400, {'error': str(exc)})
+                        return
+                    self.reply(200, result)
+                elif desktop and self.path in ('/api/desktop/mail', '/api/desktop/mail/test'):
+                    from . import desktop_mail
+
+                    try:
+                        if self.path.endswith('/test'):
+                            if body:
+                                raise ValueError('测试邮件只发送到已保存的邮箱地址。')
+                            result = desktop_mail.send_test(desktop.profile, desktop.origin)
+                        else:
+                            result = desktop_mail.save(desktop.profile, body)
                     except ValueError as exc:
                         self.reply(400, {'error': str(exc)})
                         return
@@ -1064,6 +1085,16 @@ def make_server(store, port=8768, *, legacy_execution_enabled=True, desktop=None
                     self.reply(200, update_feishu_source(store, account, body))
                 elif self.path == '/api/research-project-automation':
                     from .research_workspace import update_project_automation
+                    if 'email_enabled' in body:
+                        if not desktop:
+                            self.reject_post(400, '项目邮件设置只适用于本机版。')
+                            return
+                        if body['email_enabled'] is True:
+                            from .desktop_mail import settings
+
+                            if not settings(desktop.profile)['configured']:
+                                self.reject_post(400, '请先在右上角「邮件设置」中保存邮箱。')
+                                return
                     self.reply(200, update_project_automation(store, account, body))
                 elif self.path == '/api/research-journal':
                     from .research_workspace import import_journal
@@ -1179,7 +1210,9 @@ def make_server(store, port=8768, *, legacy_execution_enabled=True, desktop=None
                     self.reject_post(400, '项目未保存，请核对项目名称和研究背景。')
                 elif self.path == '/api/research-project-brief':
                     self.reject_post(400, '项目背景未保存，请核对编辑栏目及内容。每栏最多 500 字。')
-                elif self.path in ('/api/research-project', '/api/research-journal', '/api/research-project-feishu', '/api/research-project-automation'):
+                elif self.path == '/api/research-project-automation':
+                    self.reject_post(400, '自动检测设置未保存，请刷新项目后重试。')
+                elif self.path in ('/api/research-project', '/api/research-journal', '/api/research-project-feishu'):
                     from .feishu_folders import FolderUnavailable
 
                     message = ('飞书日报来源未保存，请核对项目、链接和所选日报。'

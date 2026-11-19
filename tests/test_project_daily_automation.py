@@ -6,7 +6,8 @@ from threading import Event
 
 import pytest
 
-from neuroei import accounts, project_daily_email, project_daily_schedule, recommendation_jobs as jobs
+from neuroei import accounts, desktop_mail, desktop_models, project_daily_email, project_daily_schedule
+from neuroei import recommendation_jobs as jobs
 from neuroei.project_understanding import JournalBatch, identity
 from neuroei.recommendation_handoff import dispatch_reviewed
 from neuroei.recommendation_pipeline import progress
@@ -141,6 +142,60 @@ def test_local_schedule_selects_all_questions_without_sending_email(workspace, m
     assert not downstream['snapshot'].get('auto_email')
     jobs.process_one(store, execute=lambda job, owner: saved_event(store, job, owner))
     assert not mailbox
+
+
+@pytest.mark.parametrize('mail_pref, outcome', [
+    ('on', 'report'), ('off', 'report'), ('disabled_after_queue', 'report'), ('on', 'no_update'),
+])
+def test_desktop_daily_delivers_only_opted_in_reports(workspace, tmp_path, monkeypatch, mail_pref, outcome):
+    store, account, pid = workspace
+    account.pop('verified_email', None)
+    store.put('account', account['user_id'], account)
+    monkeypatch.setenv(desktop_models.PROFILE_ENV, str(tmp_path))
+    queued = store.get('research_project', pid)
+    assert 'email_enabled' not in queued['automation']
+    address = 'desktop@example.invalid'
+    desktop_mail.save(tmp_path, {'address': address, 'host': 'smtp.example.invalid',
+                                 'authorization_code': 'smtp-test-fixture', 'port': 465, 'security': 'ssl'})
+    messages = []
+    monkeypatch.setattr(desktop_mail.SMTPMailer, 'send_daily_report',
+                        lambda self, to, subject, body: messages.append((self.sender, to, subject, body)))
+
+    if mail_pref != 'off':
+        update_project_automation(store, account, {'project_id': pid, 'email_enabled': True})
+        updated = update_project_automation(store, account, {'project_id': pid, 'enabled': True})
+        assert updated['automation']['email_enabled']
+    parent = schedule(store, email=None)
+    assert schedule(store, email=None)['job_id'] == parent['job_id']
+    if mail_pref == 'disabled_after_queue':
+        update_project_automation(store, account, {'project_id': pid, 'email_enabled': False})
+    if outcome == 'no_update':
+        jobs.process_one(store, execute=lambda job, owner: saved_event(store, job, owner))
+        assert not messages
+        return
+
+    payload = delivery(store, account, pid)
+    jobs.process_one(store, execute=lambda job, owner: {
+        'event_id': None, 'user_id': owner['user_id'], 'status': 'completed', 'reason': 'awaiting_review',
+        '_auto_review_requests': [payload['request_id']],
+    })
+    child, = [job for job in store.list('recommendation_job') if job['action'] == 'progress']
+    assert child['snapshot']['review_question_ids'] == ['q1', 'q2']
+
+    def completed(job, owner):
+        event = {**saved_event(store, job, owner), 'status': 'completed', 'reason': 'completed',
+                 'input': {'research_questions': payload['research_questions']}}
+        store.put('recommendation_event', event['event_id'], event)
+        return event
+
+    finished = jobs.process_one(store, execute=completed)
+    project_daily_email.send_daily_report(store, account, finished)
+    if mail_pref == 'on':
+        message, = messages
+        assert message[:2] == (address, address)
+        assert '研究问题' in message[3] and payload['research_questions'][0]['description'] in message[3]
+    else:
+        assert not messages
 
 
 @pytest.mark.parametrize('handoff', ['search', 'email'])

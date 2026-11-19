@@ -154,7 +154,7 @@ class Desktop:
                 worker = worker_status(store)
                 if (timestamp.date() != checked_day and self.model_configured()
                         and worker['status'] == 'ready' and worker.get('recommendations_enabled', True)):
-                    run(store, as_of=timestamp.isoformat(), email=False)
+                    run(store, as_of=timestamp.isoformat(), email=None)
                     checked_day = timestamp.date()
                 shutdown.wait(30)
         finally:

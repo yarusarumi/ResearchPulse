@@ -311,7 +311,8 @@ class SharedFolder(Feishu):
             raise FolderUnavailable('飞书文件夹读取失败，请检查你的授权或稍后重试。') from exc
 
     def read_blocks(self, row, headers, *, read_images=None, image_day=None, image_coverage=None,
-                    on_image_progress=None, include_images=False, only_image_ids=None, attachments=None):
+                    on_image_progress=None, include_images=False, only_image_ids=None, attachments=None,
+                    should_stop=None):
         key, url = row['token'], row['url']
         if row['type'] == 'docx':
             snapshot = (self._read_document(key, headers, include_images=True)
@@ -350,13 +351,19 @@ class SharedFolder(Feishu):
                     image_coverage['skipped'] += 1
                 else:
                     eligible.append((image, recorded))
+            reused, readings = read_images([image for image, _ in eligible],
+                                           lambda token: self._download_image(token, headers)) if eligible else (0, ())
+            done = reused
             if eligible and on_image_progress:
-                on_image_progress(0, len(eligible))
-            readings = read_images([image for image, _ in eligible], lambda token: self._download_image(token, headers)) if eligible else ()
-            for index, ((image, recorded), (text, section)) in enumerate(zip(eligible, readings, strict=True), start=1):
+                on_image_progress(done, len(eligible), reused, row['name'])
+            for (image, recorded), (text, section, from_cache) in zip(eligible, readings, strict=True):
+                if should_stop and should_stop():
+                    break
                 image_coverage['attempted'] += 1
-                if on_image_progress and (index % 5 == 0 or index == len(eligible)):
-                    on_image_progress(index, len(eligible))
+                if not from_cache:
+                    done += 1
+                    if on_image_progress and ((done - reused) % 5 == 0 or done == len(eligible)):
+                        on_image_progress(done, len(eligible), reused, row['name'])
                 if not text:
                     image_coverage['unread'] += 1
                     continue
@@ -661,21 +668,26 @@ def folder_batch(store, account, project_id, binding, manifest, as_of, *, image_
                     pending[key] = token, ocr_text
                 else:
                     known[key] = ocr_text, OCR_SECTION
-        parallel = pool and len(pending) >= (2 if sol_image_reader else IMAGE_PARALLEL_MIN)
-        results = {key: pool.submit(recognize, *candidate) for key, candidate in pending.items()} if parallel else {}
-        for pair in keys:
-            if pair is None:
-                yield '', OCR_SECTION
-                continue
-            key, sol_key = pair
-            if key not in known:
-                text, section = results[key].result() if parallel else recognize(*pending[key])
-                known[key] = text or '', section
-                if text is not None and not store.read_only:
-                    kind, cache_key = ('feishu_image_sol', sol_key) if section == sol_section else ('feishu_image_ocr', key)
-                    if section == sol_section or pending[key][1] is None:
-                        store.put(kind, cache_key, {'user_id': account['user_id'], 'project_id': project_id, 'text': text})
-            yield known[key]
+        cached_keys = frozenset(known)
+
+        def results_in_order():
+            parallel = pool and len(pending) >= (2 if sol_image_reader else IMAGE_PARALLEL_MIN)
+            results = {key: pool.submit(recognize, *candidate) for key, candidate in pending.items()} if parallel else {}
+            for pair in keys:
+                if pair is None:
+                    yield '', OCR_SECTION, False
+                    continue
+                key, sol_key = pair
+                if key not in known:
+                    text, section = results[key].result() if parallel else recognize(*pending[key])
+                    known[key] = text or '', section
+                    if text is not None and not store.read_only:
+                        kind, cache_key = ('feishu_image_sol', sol_key) if section == sol_section else ('feishu_image_ocr', key)
+                        if section == sol_section or pending[key][1] is None:
+                            store.put(kind, cache_key, {'user_id': account['user_id'], 'project_id': project_id, 'text': text})
+                yield *known[key], key in cached_keys
+
+        return sum(pair is not None and pair[0] in cached_keys for pair in keys), results_in_order()
 
     try:
         client = SharedFolder(store, account, binding['url'], grant_id=grant_id)
@@ -694,7 +706,8 @@ def folder_batch(store, account, project_id, binding, manifest, as_of, *, image_
                                                            image_day=image_day, image_coverage=image_coverage,
                                                            on_image_progress=on_image_progress,
                                                            only_image_ids=only_image_ids,
-                                                           attachments=attachments if include_attachments else None)
+                                                           attachments=attachments if include_attachments else None,
+                                                           should_stop=should_stop)
             except (DocumentReadUnavailable, httpx.TransportError, httpx.HTTPStatusError) as exc:
                 if isinstance(exc, httpx.HTTPStatusError) and not _document_unavailable(exc.response.status_code):
                     raise

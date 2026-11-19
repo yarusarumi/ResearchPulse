@@ -41,6 +41,22 @@ async function run() {
         await page.getByRole('button', {name:'重新登录或切换账号', exact:true}).click();
         await page.getByRole('button', {name:'刷新模型列表', exact:true}).click();
         await page.getByText('account-2@example.test', {exact:true}).waitFor();
+        await page.getByRole('link', {name:'返回研究台'}).click();
+        await page.getByRole('link', {name:'邮件设置', exact:true}).click();
+        await page.getByLabel('邮箱地址').fill('owner@example.invalid');
+        await page.getByLabel('SMTP 服务器').fill('smtp.example.invalid');
+        const code = page.getByLabel('SMTP 授权码');
+        await code.fill('mail-ui-fixture-code');
+        await page.getByRole('button', {name:'保存设置', exact:true}).click();
+        await page.getByText('已保存。请发送一封测试邮件验证设置。', {exact:true}).waitFor();
+        assert.equal(await code.inputValue(), '');
+        await page.route('**/api/desktop/mail/test', route => route.fulfill({json:{sent:true}}), {times:1});
+        await page.getByRole('button', {name:'发送测试邮件', exact:true}).click();
+        await page.getByText(/测试邮件已发送到已保存的邮箱/).waitFor();
+        await page.reload();
+        await page.getByText('已保存邮件设置。', {exact:true}).waitFor();
+        assert.equal(await page.getByLabel('邮箱地址').inputValue(), 'owner@example.invalid');
+        assert.equal(await code.inputValue(), '');
     } finally {
         await browser.close();
     }

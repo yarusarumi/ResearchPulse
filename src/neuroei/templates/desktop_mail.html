@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>邮件设置 · ResearchPulse</title>
+<style>
+:root{color-scheme:light;--ink:#203441;--muted:#4d6673;--line:#d7e2e6;--accent:#106c58}
+body{margin:0;background:#f2f5f6;color:var(--ink);font:16px/1.5 system-ui,sans-serif}
+main{max-width:640px;margin:auto;padding:28px 18px 48px}
+h1{font-size:28px;margin:20px 0 4px}a{color:var(--accent)}p{margin:8px 0;color:var(--muted)}
+form{margin-top:18px;padding:22px;background:white;border:1px solid var(--line);border-radius:12px}
+label{display:block;margin:12px 0}input,select{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:10px;border:1px solid #aebfc6;border-radius:6px;font:inherit;color:inherit;background:white}
+.connection{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px}
+.connection label{margin:0}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 8px}
+button{font:inherit;border:1px solid #afc1c8;padding:8px 14px;border-radius:6px;background:white;color:inherit;cursor:pointer}
+button.primary{background:var(--accent);color:white;border-color:var(--accent)}
+button:disabled{opacity:.55;cursor:default}
+</style>
+<main>
+<a href="/#today">← 返回研究台</a>
+<h1>本机邮件设置</h1>
+<p>使用自己的邮箱发送自动日报。发件人与收件人使用同一个地址。</p>
+<form id="mail-form" autocomplete="off">
+    <fieldset id="fields" disabled style="border:0;padding:0;margin:0;min-width:0">
+        <label>邮箱地址<input id="address" type="email" maxlength="254" required></label>
+        <label>SMTP 服务器<input id="host" maxlength="253" placeholder="smtp.example.com" required></label>
+        <div class="connection">
+            <label>端口<input id="port" type="number" min="1" max="65535" required></label>
+            <label>加密方式<select id="security"><option value="ssl">SSL/TLS</option><option value="starttls">STARTTLS</option></select></label>
+        </div>
+        <label>SMTP 授权码<input id="authorization-code" type="password" maxlength="512" autocomplete="new-password"></label>
+        <p id="secret-help">在邮箱服务商的设置中开启 SMTP 并获取授权码。</p>
+        <div class="actions">
+            <button class="primary" type="submit">保存设置</button>
+            <button id="test" type="button" hidden>发送测试邮件</button>
+            <button id="remove" type="button" hidden>移除邮箱设置</button>
+        </div>
+    </fieldset>
+    <p id="notice" role="status">正在读取设置…</p>
+</form>
+<p>保存并测试后，在项目的「分析日报与确认研究问题」中开启「每天 5:00 自动检测」和「完成后发送邮件」。</p>
+</main>
+<script nonce="__TOKEN__">
+const node = id => document.getElementById(id);
+const form = node('mail-form'), fields = node('fields'), notice = node('notice');
+const code = node('authorization-code');
+let configured = false;
+
+async function request(path, body) {
+    const response = await fetch(path, body === undefined ? {} : {
+        method:'POST', headers:{'Content-Type':'application/json', 'X-Review-Token':'__TOKEN__'},
+        body:JSON.stringify(body),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || '操作失败，请重新打开研究台后重试。');
+    return result;
+}
+
+function render(state) {
+    configured = state.configured;
+    for (const field of ['address', 'host', 'port', 'security']) node(field).value = state[field];
+    code.value = '';
+    code.required = !configured;
+    node('secret-help').textContent = configured
+        ? '授权码由当前 Windows 用户保护。保留原有邮箱和连接设置时，可以留空。'
+        : '在邮箱服务商的设置中开启 SMTP 并获取授权码。';
+    node('test').hidden = node('remove').hidden = !configured;
+}
+
+async function action(run, pending) {
+    fields.disabled = true;
+    notice.textContent = pending;
+    try {
+        notice.textContent = await run();
+    } catch (error) {
+        notice.textContent = error.message;
+    } finally {
+        fields.disabled = false;
+    }
+}
+
+form.addEventListener('submit', event => {
+    event.preventDefault();
+    const data = {address:node('address').value, host:node('host').value, port:Number(node('port').value),
+        security:node('security').value, authorization_code:code.value};
+    void action(async () => {
+        render(await request('/api/desktop/mail', data));
+        return '已保存。请发送一封测试邮件验证设置。';
+    }, '正在保存…');
+});
+
+node('test').addEventListener('click', () => action(async () => {
+    await request('/api/desktop/mail/test', {});
+    return '测试邮件已发送到已保存的邮箱。请检查收件箱和垃圾邮件。';
+}, '正在用已保存的设置发送…'));
+
+node('remove').addEventListener('click', () => action(async () => {
+    render(await request('/api/desktop/mail', {remove:true}));
+    return '已移除邮箱设置，自动日报将继续保存在本机。';
+}, '正在移除…'));
+
+request('/api/desktop/mail').then(state => {
+    render(state);
+    fields.disabled = false;
+    notice.textContent = configured ? '已保存邮件设置。' : '';
+}).catch(error => { notice.textContent = error.message; });
+</script>

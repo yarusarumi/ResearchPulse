@@ -62,7 +62,8 @@ class ProjectBriefUpdate(StrictModel):
 
 class ProjectAutomationUpdate(StrictModel):
     project_id: str
-    enabled: bool
+    enabled: bool | None = None
+    email_enabled: bool | None = None
 
 
 class ProjectFeishuInput(FeishuSourceInput):
@@ -186,11 +187,19 @@ def update_project_automation(store, account, payload):
     project = project_for(store, account, data.project_id)
     if project['owner_id'] != account['user_id']:
         raise PermissionError('请使用项目创建账号修改自动检测设置。')
-    automation = {'daily_enabled': data.enabled, 'daily_hour': 5, 'timezone': 'Asia/Shanghai',
-                  'updated_at': now()}
+    if data.enabled is None and data.email_enabled is None:
+        raise ValueError('请选择要修改的自动检测设置。')
     with store.transaction() as db:
         db.execute('BEGIN IMMEDIATE')
         require_active(store, project_id=data.project_id, db=db)
+        row = db.execute("SELECT json_extract(body,'$.automation') FROM objects WHERE kind='research_project' AND id=?",
+                         (data.project_id,)).fetchone()
+        automation = json.loads(row[0]) if row[0] else {}
+        automation.update(daily_hour=5, timezone='Asia/Shanghai', updated_at=now())
+        if data.enabled is not None:
+            automation['daily_enabled'] = data.enabled
+        if data.email_enabled is not None:
+            automation['email_enabled'] = data.email_enabled
         db.execute("UPDATE objects SET body=json_set(body,'$.automation',json(?)) WHERE kind='research_project' AND id=?",
                    (json.dumps(automation), data.project_id))
     return {'project_id': data.project_id, 'automation': automation}

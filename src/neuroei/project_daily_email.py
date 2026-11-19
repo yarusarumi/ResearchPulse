@@ -252,25 +252,37 @@ def _body(project, event, job, origin):
 def send_daily_report(store, account, job):
     if not job.get("snapshot", {}).get("auto_email"):
         return {"status": "not_requested"}
+    from .desktop_models import active_profile
+
+    profile = active_profile()
+    if profile is not None and (not job["snapshot"].get("scheduled_project_daily")
+                                or job.get("action") != "progress"
+                                or job["status"] not in ("completed", "partial", "skipped")
+                                or job.get("reason") in ("no_update", "no_new_or_updated_journals_in_window")):
+        return {"status": "not_requested"}
     key = job["job_id"]
     try:
         with project_lock(store.root, "project-daily-email:" + key):
-            return _deliver(store, account, job)
+            return _deliver(store, account, job, profile)
     except WorkflowBusy:
         return {"job_id": key, "status": "sending"}
 
 
-def _deliver(store, account, job):
+def _deliver(store, account, job, profile):
     from .recommendation_jobs import automatic_project_enabled
 
     key = job["job_id"]
     prior = store.select("auto_email_delivery", ("status",), key=key)
     if prior and prior[0]["status"] == "sent":
         return store.get("auto_email_delivery", key)
+    if profile is not None and prior and prior[0]["status"] in ("sending", "unknown"):
+        result = {"job_id": key, "status": "unknown", "reason": "interrupted_delivery", "updated_at": now()}
+        store.put("auto_email_delivery", key, result)
+        return result
     current = accounts.find(store, account["user_id"])
     reason = ("account_unavailable" if not current or current["disabled"] else
               "automation_disabled" if not automatic_project_enabled(store, job) else
-              "verified_email_missing" if not current.get("verified_email") else None)
+              "verified_email_missing" if profile is None and not current.get("verified_email") else None)
     if reason:
         result = {"job_id": key, "status": "skipped", "reason": reason, "updated_at": now()}
         store.put("auto_email_delivery", key, result)
@@ -283,16 +295,26 @@ def _deliver(store, account, job):
         if (job["user_id"] != current["user_id"] or event["user_id"] != current["user_id"]
                 or event["project_id"] != project["project_id"] or project["owner_id"] != current["user_id"]):
             raise PermissionError("Daily email scope mismatch")
-        mailer = account_email.SMTPMailer.configured()
+        if profile is not None:
+            from . import desktop_mail
+
+            if not (project.get("automation") or {}).get("email_enabled"):
+                result = {"job_id": key, "status": "skipped", "reason": "email_disabled", "updated_at": now()}
+                store.put("auto_email_delivery", key, result)
+                return result
+            mailer = desktop_mail.mailer(profile)
+        else:
+            mailer = account_email.SMTPMailer.configured()
         if mailer is None:
             raise RuntimeError("smtp_unconfigured")
+        recipient = mailer.sender if profile is not None else current["verified_email"]
         date = datetime.fromisoformat(job.get("created_at", now())).astimezone(TZ).date().isoformat()
         title = " ".join(project["title"].split())
         subject = f"ResearchPulse 自动日报 · {title} · {date}"
         body = _body(project, event, job, mailer.origin)
         store.put("auto_email_delivery", key, {"job_id": key, "status": "sending", "updated_at": now()})
-        mailer.send_daily_report(current["verified_email"], subject, body)
-        result = {"job_id": key, "status": "sent", "email": current["verified_email"], "sent_at": now(),
+        mailer.send_daily_report(recipient, subject, body)
+        result = {"job_id": key, "status": "sent", "email": recipient, "sent_at": now(),
                   "event_id": job["event_id"]}
     except Exception as exc:
         result = {"job_id": key, "status": "failed", "reason": type(exc).__name__, "updated_at": now(),
