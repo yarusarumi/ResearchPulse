@@ -1,0 +1,25 @@
+{
+  "schema_version": "1",
+  "request_id": "analysis-demo-20261103",
+  "user_id": "offline-reviewer",
+  "paper_id": "arxiv:2610.40637",
+  "paper_version": "v1",
+  "status": "unavailable",
+  "reading_scope": {
+    "documents": [],
+    "missing": [
+      "fulltext unavailable"
+    ]
+  },
+  "methods": [],
+  "findings": [],
+  "limitations": [],
+  "relevance_to_questions": {},
+  "research_suggestions": [],
+  "claims": [],
+  "evidence": [],
+  "warnings": [
+    "Full text unavailable"
+  ],
+  "audit_refs": []
+}

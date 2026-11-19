@@ -1,0 +1,110 @@
+{
+  "request_id": "discovery-robot-bootstrap-example",
+  "schema_version": "1",
+  "user_id": "offline-example",
+  "status": "partial",
+  "candidates": [
+    {
+      "paper_id": "arxiv:2303.04137",
+      "paper_version": "v1",
+      "title": "Diffusion Policy",
+      "authors": [],
+      "doi": null,
+      "arxiv_id": "2303.04137",
+      "venue": null,
+      "published_at": "2023-03-07T18:00:00Z",
+      "date_basis": "arxiv_first_submission",
+      "abstract": null,
+      "original_links": [
+        "https://arxiv.org/abs/2303.04137"
+      ],
+      "fulltext_links": [
+        "https://arxiv.org/pdf/2303.04137v1"
+      ],
+      "sources": [
+        {
+          "source": "arxiv",
+          "paper_id": "arxiv:2303.04137",
+          "version": "v1",
+          "url": "https://arxiv.org/abs/2303.04137",
+          "published_at": "2023-03-07T18:00:00Z",
+          "paper_version": "v1",
+          "fulltext_links": [
+            "https://arxiv.org/pdf/2303.04137v1"
+          ],
+          "selected_document": true,
+          "date_basis": "arxiv_first_submission"
+        },
+        {
+          "source": "arxiv",
+          "paper_id": "arxiv:2303.04137",
+          "version": "v1",
+          "url": "https://arxiv.org/abs/2303.04137",
+          "published_at": "2023-03-07T18:00:00Z",
+          "paper_version": "v1",
+          "fulltext_links": [
+            "https://arxiv.org/pdf/2303.04137v1"
+          ],
+          "selected_document": false,
+          "date_basis": "arxiv_first_submission"
+        }
+      ],
+      "versions": [
+        "v1"
+      ]
+    }
+  ],
+  "recommendations": [],
+  "source_runs": [
+    {
+      "source": "arxiv",
+      "query": "diffusion policy",
+      "since": "1900-01-01",
+      "until": "2026-11-03",
+      "status": "ok",
+      "count": 1,
+      "error": null,
+      "truncated": false,
+      "fetched_at": "2026-11-03T15:13:54.931881+00:00",
+      "effective_requests": [],
+      "coverage_complete": false
+    },
+    {
+      "source": "arxiv",
+      "query": "bimanual manipulation",
+      "since": "1900-01-01",
+      "until": "2026-11-03",
+      "status": "ok",
+      "count": 1,
+      "error": null,
+      "truncated": false,
+      "fetched_at": "2026-11-03T15:13:54.931881+00:00",
+      "effective_requests": [],
+      "coverage_complete": false
+    }
+  ],
+  "warnings": [
+    "paperflow_ranking_unavailable: explicit provisioned embeddings required"
+  ],
+  "decisions": [
+    {
+      "paper_id": "arxiv:2303.04137",
+      "canonical_id": "arxiv:2303.04137",
+      "reason": "deduplicated",
+      "version": "v1"
+    },
+    {
+      "paper_id": "arxiv:2303.04137",
+      "reason": "ranking_unavailable"
+    }
+  ],
+  "audit": {
+    "policy": "discovery-v1.2",
+    "input_fingerprint": "128afc31c682090b849d692f43d4c7b67105bb08fd7238783eb4b4458ca02cd4",
+    "model_calls": 0,
+    "paid_model_calls": 0,
+    "ranking_policy": "unavailable",
+    "publication_window": null,
+    "verification_kind": "synthetic_transport_no_model"
+  }
+}
