@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · ResearchPulse 文献研究台</title>
+<style>
+:root{
+  --paper:#f4f3ed;--surface:#fff;--ink:#1a1d19;--ink-soft:#474c44;--muted:#5c6f79;
+  --line:#e6e4da;--line-strong:#d2d0c3;--accent:#194a3b;--accent-strong:#123a2e;
+  --danger:#a03a2b;--radius-lg:18px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI Variable Text","Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+::selection{background:#d5e0d1;color:var(--ink)}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--paper);color:var(--ink);font:15px/1.65 var(--font);-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(900px 420px at 50% -10%,rgba(25,74,59,.07),transparent 70%)}
+main{position:relative;width:100%;max-width:396px}
+.brand{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 0 18px}
+.brand-mark{display:grid;place-items:center;width:31px;height:31px;border-radius:9px;background:var(--accent);color:#f7f6f0;font-size:15px;font-weight:700;letter-spacing:-.02em}
+.brand-name{font-size:17px;font-weight:650;letter-spacing:-.012em}
+.brand-sub{color:var(--muted);font-size:12px;letter-spacing:.05em;margin-left:2px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);padding:32px 30px;box-shadow:0 1px 2px rgba(22,25,20,.04),0 18px 50px rgba(22,25,20,.06)}
+h1{margin:0 0 6px;font-size:23px;letter-spacing:-.022em;font-weight:620;color:var(--ink)}
+.desc{margin:0 0 22px;color:var(--muted);font-size:13.5px;line-height:1.6}
+label{display:block;margin-bottom:16px;font-size:13px;color:var(--ink-soft)}
+input{display:block;width:100%;margin-top:7px;padding:10px 12px;border:1px solid var(--line-strong);border-radius:9px;background:#fff;color:var(--ink);font:inherit;font-size:15px;transition:border-color .15s,box-shadow .15s}
+input:hover{border-color:var(--muted)}
+input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(25,74,59,.14)}
+input:focus-visible{outline:none}
+button{width:100%;margin-top:6px;padding:11px 14px;border:1px solid var(--accent);border-radius:9px;background:var(--accent);color:#f7f6f0;font:inherit;font-weight:600;font-size:15px;cursor:pointer;transition:background .15s ease,transform .1s ease}
+button:hover{background:var(--accent-strong);border-color:var(--accent-strong)}
+button:active:not([disabled]){transform:translateY(1px)}
+button[disabled]{opacity:.62;cursor:progress}
+.error{min-height:20px;margin:12px 0 0;color:var(--danger);font-size:13px}
+.note{margin:20px 0 0;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;line-height:1.65}
+.note a{color:var(--accent);margin-inline-end:16px;text-underline-offset:3px}
+.message{color:var(--accent);font-size:14px}
+#accountError:empty{display:none}
+.mail-confirmation{padding:14px 16px;border-radius:8px;background:#edf6f2;color:var(--accent-strong);font-size:14px}
+.mail-confirmation p{margin:4px 0 0}
+.mail-confirmation button{width:auto;margin:10px 0 0;padding:0;border:0;background:none;color:inherit;font-size:inherit;text-decoration:underline;text-underline-offset:3px}
+.mail-confirmation button:hover{background:none;color:var(--accent)}
+[hidden]{display:none!important}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{--paper:#f4f6f7;--surface:#fff;--ink:#24333d;--ink-soft:#3d5059;--muted:#5c6f79;--line:#dfe7e9;--line-strong:#c7d5d8;--accent:#0f6e56;--accent-strong:#085041;--danger:#a32d2d;--radius-lg:12px}
+body{padding:20px;background:var(--paper)}body::before{display:none}main{max-width:400px}.brand{margin-bottom:20px}.brand-mark{width:34px;height:34px;border-radius:9px;background:var(--accent)}.brand-name{font-weight:600}.brand-sub{color:var(--muted)}
+.card{padding:30px;border-color:var(--line);box-shadow:none}h1{font-size:24px;font-weight:600}.desc{color:var(--muted)}input{border-color:var(--line-strong);border-radius:8px}input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(15,110,86,.12)}button{border-radius:8px;background:var(--accent);font-weight:600}button:hover{background:var(--accent-strong)}
+.password-toggle{display:flex;align-items:center;gap:7px;margin:-4px 0 12px;color:var(--muted);cursor:pointer}.password-toggle input{width:16px;height:16px;min-height:0;margin:0;padding:0;accent-color:var(--accent);box-shadow:none}.note{border-color:var(--line)}.security-note{margin-top:14px;padding-top:12px;font-size:12px}
+</style></head>
+<body><main>
+<div class="brand"><span class="brand-mark" aria-hidden="true">R</span><span class="brand-name">ResearchPulse</span><span class="brand-sub">文献研究台</span></div>
+<div class="card">
+<h1>登录</h1>
+<p class="desc">使用实验室账号进入研究台。</p>
+<form id="loginForm" autocomplete="on">
+<label>用户名 <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required aria-describedby="error" autofocus></label>
+<label>密码 <input id="password" name="password" type="password" autocomplete="current-password" required aria-describedby="error"></label>
+<label class="password-toggle" for="show-password"><input id="show-password" type="checkbox">显示密码</label>
+<button type="submit" id="submit">登录</button>
+<p class="error" id="error" role="alert" aria-live="assertive"></p>
+</form>
+<form id="accountForm" hidden>
+<label data-field="email">邮箱 <input name="email" type="email" autocomplete="email" maxlength="254"></label>
+<label data-field="username">用户名 <input name="username" autocomplete="username" minlength="2" maxlength="32"></label>
+<label data-field="display_name">显示名 <input name="display_name" autocomplete="nickname" maxlength="100"></label>
+<label data-field="password"><span id="passwordLabel">密码</span> <input name="password" type="password" maxlength="200"></label>
+<label data-field="confirm">确认密码 <input name="confirm" type="password" autocomplete="new-password" maxlength="200"></label>
+<button id="accountSubmit"></button>
+<p class="error" id="accountError" role="alert"></p>
+<div id="registrationConfirmation" class="mail-confirmation" hidden>
+<div role="status"><strong>请查收验证邮件</strong><p>发送请求已提交。请打开邮件中的链接，继续设置用户名和密码。若未收到，请检查垃圾邮件，或在一分钟后重新发送。</p></div>
+<button id="editRegistrationEmail" type="button">修改邮箱或重发</button>
+</div>
+</form>
+<p id="message" class="message" role="status" hidden></p>
+<p class="note" id="loginLinks" hidden><a href="/account/register">注册账号</a><a href="/account/forgot">忘记密码</a></p>
+<p class="note" id="adminNote">账号或密码问题请联系实验室管理员。</p>
+<p class="note" id="backLinks" hidden><a id="backLink" href="/login">返回登录</a><a id="requestAgain" hidden>重新申请链接</a></p>
+<p class="note security-note">所有输出均为草稿证据，不会自动上传或发布。</p>
+</div>
+</main>
+<script nonce="__TOKEN__">
+const token='__TOKEN__';
+const mailEnabled=__ACCOUNT_EMAIL_ENABLED__;
+const byId=id=>document.getElementById(id);
+const form=document.getElementById('loginForm'),error=document.getElementById('error'),submit=document.getElementById('submit');
+const page=location.pathname.split('/').pop();
+const linkToken=location.hash.slice(1);
+if(page==='login' || !page){
+  byId('loginLinks').hidden=!mailEnabled;
+  byId('adminNote').hidden=mailEnabled;
+}else{
+  document.title='账号 · ResearchPulse 文献研究台';
+  form.hidden=true;
+  byId('adminNote').hidden=true;
+  byId('backLinks').hidden=false;
+  if(page==='bind'){byId('backLink').href='/';byId('backLink').textContent='返回工作台';}
+  const complete=Boolean(linkToken)||page==='reset';
+  const modes={
+    register:['注册账号','发送验证邮件','设置用户名和密码','创建账号'],
+    forgot:['找回密码','发送重置邮件'],
+    reset:['重置密码','','打开邮件链接后设置新密码','保存新密码'],
+    bind:['绑定邮箱','发送验证邮件','确认绑定此邮箱','确认绑定']
+  };
+  const label=modes[page];
+  const accountForm=byId('accountForm'), accountSubmit=byId('accountSubmit'), accountError=byId('accountError');
+  const message=byId('message');
+  const showMessage=text=>{message.textContent=text;message.hidden=false;};
+  const requestAgain=byId('requestAgain');
+  const action=page==='forgot'?'reset':page;
+  document.querySelector('h1').textContent=label[0];
+  document.querySelector('.desc').textContent=complete?label[2]:
+    page==='register'?'验证邮箱后，再设置用户名和密码。':
+    page==='forgot'?'输入账号已绑定的邮箱。': '绑定后可通过邮箱找回密码。';
+  if(complete){
+    requestAgain.href=page==='reset'?'/account/forgot':location.pathname;
+    requestAgain.hidden=false;
+  }
+  if(!mailEnabled || (complete&&!/^[A-Za-z0-9_-]{43}$/.test(linkToken))){
+    showMessage(mailEnabled?'请从收到的邮件打开有效链接。':'邮箱服务尚未启用，请联系实验室管理员。');
+  }else{
+    const fields=complete?(page==='register'?['username','display_name','password','confirm']:
+      page==='reset'?['password','confirm']:[]):(page==='bind'?['email','password']:['email']);
+    accountForm.hidden=false;
+    accountSubmit.textContent=label[complete?3:1];
+    byId('passwordLabel').textContent=page==='bind'?'当前密码':'新密码';
+    accountForm.elements.password.autocomplete=page==='bind'?'current-password':'new-password';
+    if(complete)accountForm.elements.password.minLength=10;
+    for(const wrap of accountForm.querySelectorAll('[data-field]')){
+      const active=fields.includes(wrap.dataset.field), input=wrap.querySelector('input');
+      wrap.hidden=!active;
+      input.disabled=!active;
+      input.required=active;
+    }
+    const registering=page==='register'&&!complete;
+    const confirmation=byId('registrationConfirmation');
+    const emailInput=accountForm.elements.email;
+    const editEmail=byId('editRegistrationEmail');
+    editEmail.addEventListener('click',()=>{
+      confirmation.hidden=true;
+      emailInput.readOnly=false;
+      accountSubmit.hidden=false;
+      emailInput.focus();
+    });
+    accountForm.addEventListener('submit',async event=>{
+      event.preventDefault();
+      if(accountSubmit.disabled||accountSubmit.hidden)return;
+      accountError.textContent='';
+      const body=Object.fromEntries(new FormData(accountForm));
+      if(body.confirm!==undefined){
+        if(body.confirm!==body.password){accountError.textContent='两次输入的密码不一致。';return;}
+        delete body.confirm;
+      }
+      if(complete)body.token=linkToken;
+      accountSubmit.disabled=true;
+      if(registering)accountSubmit.textContent='发送中…';
+      try{
+        const response=await fetch('/api/account/'+action+'/'+(complete?'complete':'email'),{
+          method:'POST',headers:{'Content-Type':'application/json','X-Review-Token':token},body:JSON.stringify(body)
+        });
+        const result=await response.json();
+        if(!response.ok){accountError.textContent=result.error||'提交失败，请重试。';return;}
+        if(registering){
+          emailInput.value=body.email;
+          emailInput.readOnly=true;
+          accountSubmit.hidden=true;
+          confirmation.hidden=false;
+          editEmail.focus();
+          return;
+        }
+        accountForm.reset();
+        if(complete){
+          history.replaceState(null,'',location.pathname);
+          accountForm.hidden=true;
+          requestAgain.hidden=true;
+          showMessage(page==='register'?'注册完成，请返回登录。':page==='reset'?'密码已重置，请用新密码登录。':'邮箱已绑定。');
+        }else showMessage(result.message);
+      }catch(_){accountError.textContent='无法连接服务器，请稍后重试。';}
+      finally{
+        accountSubmit.disabled=false;
+        if(registering)accountSubmit.textContent=label[1];
+      }
+    });
+  }
+}
+byId('show-password').addEventListener('change',event=>{
+  byId('password').type=event.target.checked?'text':'password';
+});
+form.addEventListener('submit',async event=>{
+  event.preventDefault();
+  error.textContent='';for(const el of [document.getElementById('username'),document.getElementById('password')])el.removeAttribute('aria-invalid');
+  const username=document.getElementById('username').value.trim();
+  const password=document.getElementById('password').value;
+  if(!username||!password){error.textContent='请输入用户名和密码。';for(const el of [document.getElementById('username'),document.getElementById('password')])el.setAttribute('aria-invalid','true');return;}
+  submit.disabled=true;submit.textContent='登录中…';
+  try{
+    const response=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json','X-Review-Token':token},body:JSON.stringify({username,password})});
+    const data=await response.json().catch(()=>({}));
+    if(response.ok){const next=new URL(new URLSearchParams(location.search).get('next')||(location.hash.startsWith('#reading?')?'/'+location.hash:'/'),location.origin);if(next.pathname==='/account/bind')next.hash=location.hash;location.replace(next.origin===location.origin?next.href:'/');return;}
+    error.textContent=data.error||'登录失败，请重试。';
+  }catch(_){error.textContent='无法连接服务器，请检查网络后重试。';}
+  finally{submit.disabled=false;submit.textContent='登录';}
+});
+</script>
+</body></html>

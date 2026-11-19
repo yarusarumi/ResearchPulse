@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>打开本机研究台 · ResearchPulse</title>
+<style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f2f5f6;color:#203441;font:17px/1.55 system-ui,sans-serif}
+main{width:min(420px,calc(100% - 48px));box-sizing:border-box;padding:28px;border:1px solid #d7e2e6;border-radius:14px;background:white}
+h1{margin:0 0 12px;font-size:24px}p{margin:0;color:#4c6571}
+</style>
+<main><h1>ResearchPulse 本机研究台</h1><p id="open-status" role="status">请双击「启动研究台」打开工作台。</p></main>
+<script nonce="__TOKEN__">
+(async () => {
+    if (location.pathname !== '/desktop/open' || !location.hash) return;
+    const launchToken = location.hash.slice(1);
+    history.replaceState(null, '', '/desktop/open');
+    const status = document.getElementById('open-status');
+    status.textContent = '正在打开本机研究台…';
+    try {
+        const response = await fetch('/api/desktop/open', {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token:launchToken})
+        });
+        if (!response.ok) throw new Error();
+        location.replace('/');
+    } catch {
+        status.textContent = '打开链接已失效。请双击「启动研究台」重新打开。';
+    }
+})();
+</script>
+</html>

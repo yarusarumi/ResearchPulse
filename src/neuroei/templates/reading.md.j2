@@ -1,0 +1,56 @@
+# ResearchPulse 文献阅读报告 · {{ report_date }}
+
+{% if context_kind == 'direction' %}自主关注方向：{{ project.project_id }}；研究设置：{{ project.version }}；报告运行：{{ run_id }}。{% else %}项目：{{ project.project_id }}；档案：{{ project.version }}；报告运行：{{ run_id }}。{% endif %}
+状态：待审阅。只保存本地／授权服务器，禁止上传飞书；源日报与项目材料不改动。
+采用官方正文文本定位、词法检索和 DeepSeek Flash 分析／同模型复核。通过复核不等于人工确认；数字出现检查不能验证单位、表格行列、适用条件或统计显著性。
+流程与核验强度分开标注：阅读流程结束只表示自动分析已运行；核验强度只到“原文定位＋原文绑定＋数字出现检查”级，未逐项人工核对，不构成逐项正文核验。
+本报告是独立的文献产物，不代表已经实施下述实验，也不会修改实验队列。各篇的来源标记见下文；更正／撤稿状态尚未独立确认。
+{% if context_kind == 'direction' %}方向和问题来自使用者明确设置，用于组织研究；文中条件性结论只描述论文自身的实验条件，若你的研究具备这些条件才可考虑迁移，均待审阅，不构成已验证科研结论。{% else %}项目关联来自历史导出材料，档案中最近原文日期：{{ latest_source_date }}。文中如出现项目指标，均视为该版本材料的历史摘录，不代表当前实验状态，也不构成新实验结论。{% endif %}
+
+{% for entry in entries %}
+## {{ loop.index }}. {{ entry.paper.title }}
+
+[官方论文]({{ entry.paper.url|replace('http://', 'https://') }})；{{ entry.paper.paper_id }} {{ entry.paper.version }}；作者：{{ entry.paper.authors|join('; ') }}。
+日期：{{ entry.paper.published }}；分析运行：{{ entry.analysis.run_id }}；代码：{{ entry.analysis.code_revision }}。
+来源标记：{% if entry.paper.is_preprint %}预印本{% else %}索引或期刊记录{% endif %}。
+阅读流程：已完成（流程结束）；核验强度：自动检查级（未逐项人工核对，不表示已逐项核对正文）。
+{% if entry.analysis.acquisition is defined %}开放正文来源：Europe PMC；记录：{{ entry.analysis.acquisition.pmcid }}。许可与获取记录保留在分析数据中；XML正文按段落定位。
+{% endif %}
+{% if entry.analysis.supplementary_acquisition is defined %}补充材料状态：{{ entry.analysis.supplementary_acquisition.status }}。PDF页码属于各自的补充文件；获取不等于完成解析或科研核验。
+{% for attachment in entry.analysis.supplementary_acquisition.files %}- {{ attachment.name }}：{{ attachment.status }}{% if attachment.pages_processed is defined %}，处理{{ attachment.pages_processed }}/{{ attachment.total_pages }}页{% endif %}。
+{% endfor %}{% else %}独立补充材料未读取。
+{% endif %}
+已解析材料的选段覆盖（不是全文完整率）：{{ entry.coverage.selected }}/{{ entry.coverage.available }}（{{ entry.coverage.percent }}）；通过检查 {{ entry.claims|length }} 条，拒绝 {{ entry.rejected }} 条。{% if entry.analysis.implementation_review_exclusions is defined %}另有 {{ entry.analysis.implementation_review_exclusions|length }} 条因实施抽查问题而排除，原始记录保留。{% endif %}
+{% if entry.analysis.retrieval is defined %}选段：{{ entry.analysis.retrieval.strategy }}。覆盖配额仅用于减少遗漏，不能保证完整读过所有方法和实验。
+{% endif %}
+核验边界：图、表与独立补充材料不纳入本报告的逐项核验范围；补充材料只记录获取／解析状态，不能据此推断图中或补充材料结果。
+{% for limitation in entry.analysis.limitations %}- 阅读限制：{{ limitation }}
+{% endfor %}
+{% for kind, title in [('paper_fact', '论文报告的事实'), ('inference', '对你的研究情境的推断' if context_kind == 'direction' else '对项目的推断'), ('experiment_suggestion', '待讨论的实验建议')] %}
+### {{ title }}
+{% for item in entry.claims if item.claim.kind == kind %}
+#### {{ item.anchor }}
+
+{{ item.claim.text }}
+
+  适用范围／限制：{{ item.claim.limitation }}
+
+  {% if context_kind == 'direction' %}关注问题{% else %}项目问题{% endif %}：{{ item.claim.question_ids|join(', ') }}。对应原文摘录：[查看](#{{ item.anchor }})。
+
+  {% if item.supports %}原文短摘录：{% for support in item.supports %}「{{ support.quote }}」（{{ support.role }}；{% if support.url %}[{{ support.kind }}]({{ support.url }}){% else %}{{ support.file }}{% endif %} · {{ support.evidence_id }}）{% if not loop.last %}；{% endif %}{% endfor %}
+  {% else %}原文短摘录：本条分析未保存逐字原文句；以下定位证据供人工核对。
+  {% endif %}
+  证据：{% for cite in item.citations %}{% if cite.url %}[{{ cite.label }}]({{ cite.url }}){% else %}{{ cite.file }} · {{ cite.label }}{% endif %}{% if not loop.last %}；{% endif %}{% endfor %}。数字检查：{{ item.numeric_status|numeric_label }}；原文绑定：{{ item.grounding_status|grounding_label }}。
+{% else %}
+{% if kind == 'experiment_suggestion' %}本篇无单独通过检查的实验建议；综合建议见{% if context_kind == 'direction' %}方向进展{% else %}项目科研情报综合{% endif %}，均待审阅。{% else %}暂无通过当前检查的条目。{% endif %}
+{% endfor %}
+{% endfor %}
+### {% if context_kind == 'direction' %}关注问题的声明来源{% else %}项目问题的原文位置{% endif %}
+{% if entry.analysis.unanswered is defined and entry.analysis.unanswered %}
+本次证据尚不能回答：{{ entry.analysis.unanswered|join('；') }}。
+{% endif %}
+{% for ref in entry.project_refs %}
+- {{ ref.question.id }}：{{ ref.question.text }}（原文日期 {{ ref.question.source_date or '未知' }}；{{ ref.question.temporal_status }}）
+{% for block in ref.blocks %}  - {% if block.file %}{{ block.file }}，L{{ block.line_start }}–L{{ block.line_end }}{% else %}{{ block.document_id }} · {{ block.block_id }}{% endif %}{% if block.section %}（{{ block.section }}；源版本 {{ block.revision }}）{% else %}（源版本 {{ block.revision }}）{% endif %}。
+{% endfor %}{% endfor %}
+{% endfor %}

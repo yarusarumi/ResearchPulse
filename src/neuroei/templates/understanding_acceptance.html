@@ -1,0 +1,100 @@
+<div id="pu-acceptance">
+  <h2>项目理解 · 逐日验收</h2>
+  <div class="pu-gap text-small">真实历史原文＋人工固定抽取样例 · 无付费调用 · 真实模型科研质量待验</div>
+  <div id="pu-independent" class="pu-gap text-small"></div>
+  <div class="viz-controls pu-gap">
+    <label class="form-label">历史日期<select class="form-select" id="pu-day" aria-label="历史日期"></select></label>
+    <label class="form-label">我的结论<select class="form-select" id="pu-verdict" aria-label="我的结论"><option value="unreviewed">未验收</option><option value="pass">通过</option><option value="question">存疑</option><option value="fail">不通过</option></select></label>
+    <button class="btn" type="button" id="pu-export">生成可复制的验收记录</button>
+  </div>
+  <div id="pu-status" class="pu-gap" aria-live="polite"></div>
+  <div id="pu-feedback" class="pu-gap text-small"></div>
+  <div id="pu-audit" class="text-small pu-gap"></div>
+  <hr>
+  <h3>1 · 本次变化与旧状态</h3>
+  <div id="pu-changes" class="pu-gap"></div>
+  <details class="pu-gap"><summary>逐章节引用覆盖（有引用不代表没有遗漏）</summary><div id="pu-coverage" class="pu-gap"></div></details>
+  <h3 class="pu-gap">2 · 研究问题与行动建议（人工示例，待验证）</h3>
+  <div id="pu-needs" class="pu-gap"></div>
+  <h3 class="pu-gap">3 · 原文证据</h3>
+  <div id="pu-evidence" class="pu-gap"></div>
+  <details class="pu-gap"><summary>查看当天模型输入原文（历史快照，非实时状态）</summary><div id="pu-inputs" class="pu-gap"></div></details>
+  <hr>
+  <h3>4 · 人工验收记录</h3>
+  <div class="pu-gap" id="pu-checks">
+    <label class="form-check"><input class="form-check-input" type="checkbox" data-check="changes"><span class="form-check-label">关键变化没有遗漏，修正没有被旧结论覆盖</span></label>
+    <label class="form-check"><input class="form-check-input" type="checkbox" data-check="temporal"><span class="form-check-label">历史记录、计划、假设没有写成当前已确认事实</span></label>
+    <label class="form-check"><input class="form-check-input" type="checkbox" data-check="evidence"><span class="form-check-label">推荐需求能逐条定位原文，推断和原文结论分开</span></label>
+    <label class="form-check"><input class="form-check-input" type="checkbox" data-check="decision"><span class="form-check-label">检索需求具体，能帮助当前下一步决策</span></label>
+  </div>
+  <label class="form-label pu-gap">遗漏、错误或不够具体之处<textarea class="form-control" id="pu-note" rows="3" aria-label="验收备注"></textarea></label>
+  <label class="form-label pu-gap" id="pu-export-label" hidden>验收记录 JSON（可复制保存）<textarea class="form-control" id="pu-export-text" readonly rows="5" aria-label="验收记录JSON"></textarea></label>
+  <details class="pu-gap"><summary>独立验收结果与验证边界</summary><pre id="pu-review" class="pu-gap"></pre></details>
+</div>
+<!-- ACCEPTANCE_DATA -->
+<style>
+#pu-acceptance{font-family:system-ui,sans-serif}
+#pu-acceptance .pu-gap{margin-top:calc(var(--font-size-base)*.75)}
+#pu-acceptance .pu-entry{margin:calc(var(--font-size-base)*.75) 0;overflow-wrap:anywhere}
+#pu-acceptance pre{white-space:pre-wrap;overflow-wrap:anywhere}
+#pu-acceptance blockquote{margin:calc(var(--font-size-base)*.5) 0;padding-left:calc(var(--font-size-base)*.75);border-left:2px solid var(--border)}
+#pu-acceptance .pu-selected{background:var(--accent);color:var(--accent-foreground)}
+</style>
+<script>
+(()=>{
+const root=document.getElementById('pu-acceptance');
+const data=JSON.parse(document.getElementById('pu-acceptance-data').textContent);
+const el=id=>root.querySelector('#'+id);
+const add=(parent,tag,text,cls)=>{const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;parent.append(n);return n};
+const day=el('pu-day'),verdict=el('pu-verdict'),note=el('pu-note');
+const report=data.independent_review;
+el('pu-independent').textContent=report?`独立验收：记录${report.initial_findings?.length||0}项问题；模块测试${report.recheck?.module_tests?.passed||0}项通过。当前审阅范围与限制见报告，真实模型科研质量仍待验。`:'独立验收：待出报告';
+let reviews=JSON.parse(JSON.stringify(data.initial_reviews||{})),selected=data.default_date||(data.cases.some(c=>c.id==='2026-08-29')?'2026-08-29':data.cases[0].id);
+const saved=window.openai?.widgetState;
+if(saved?.privateContent?.review_version===data.review_version&&saved.privateContent.reviews)reviews=saved.privateContent.reviews;
+if(saved?.privateContent?.review_version===data.review_version&&data.cases.some(c=>c.id===saved?.modelContent?.date))selected=saved.modelContent.date;
+data.cases.forEach(c=>{const o=add(day,'option',c.id);o.value=c.id});day.value=selected;
+const displayRef=ref=>{
+const target=[...root.querySelectorAll('[data-ref]')].find(n=>n.dataset.ref===ref);
+if(target){root.querySelectorAll('.pu-selected').forEach(n=>n.classList.remove('pu-selected'));target.classList.add('pu-selected');target.scrollIntoView({block:'center',behavior:'auto'});}
+};
+function render(){
+const c=data.cases.find(x=>x.id===selected),r=c.result,s=reviews[selected]||{};
+el('pu-status').textContent=`状态：${r.status} · 需求${r.request?.research_questions.length||0}条 · 本次固定抽取${r.model_calls}批（真实模型0次）`;
+const priorReview=data.human_review_original?.reviews?.[selected];
+el('pu-feedback').textContent=priorReview?((data.changed_dates||[]).includes(selected)?`原验收：不通过 · ${priorReview.note}。本日期已补充，等待重新验收，原结论未覆盖。`:`保留你的原验收：${{pass:'通过',fail:'不通过',unreviewed:'未验收',question:'存疑'}[priorReview.verdict]}${priorReview.note?' · '+priorReview.note:''}。本日期样例内容未改动。`):'';
+el('pu-audit').textContent=`日报窗口：${r.trigger_details.window.since} → ${r.trigger_details.window.until}（半开区间）；同步时间与日报日期分开保存。`;
+['pu-changes','pu-needs','pu-evidence','pu-inputs','pu-coverage'].forEach(id=>el(id).replaceChildren());
+const old=new Map(c.previous_items.map(i=>[i.id,i]));
+const kind={result:'原记录结果',difficulty:'困难',plan:'计划',hypothesis:'待验证假设',data:'数据',setting:'实验设置'};
+const relation={add:'新增',corrects:'修正',contradicts:'矛盾，尚未裁决',supports:'支持旧记录'};
+const changedDate=(data.changed_dates||[]).includes(selected),groups=new Map();
+if(changedDate){add(el('pu-changes'),'div',`已补充${c.changes.length}条有据记录，按来源章节列出；属于近期工作总结，不代表全部实验都在当天首次完成。`);
+c.changes.forEach(i=>{const section=i.source_refs?.[0]?.locator?.section||'未注明章节';if(!groups.has(section)){const d=add(el('pu-changes'),'details','','pu-entry');add(d,'summary',section);groups.set(section,d);}});}
+c.changes.forEach(i=>{const section=i.source_refs?.[0]?.locator?.section;const parent=changedDate?groups.get(section||'未注明章节'):el('pu-changes');const a=add(parent,'div','', 'pu-entry');if(!changedDate&&section)add(a,'div',section,'text-small');add(a,'div',`${relation[i.relation]||i.relation} · ${kind[i.kind]||i.kind} · ${i.epistemic==='unconfirmed'?'未确认':'原日志记载，未独立核实'}`,'text-small');
+i.target_ids.forEach(id=>add(a,'blockquote','旧记录：'+(old.get(id)?.text||id)));
+add(a,'div',i.text);if(i.conditions.length)add(a,'div','适用条件：'+i.conditions.join('；'),'text-small');
+const trace=add(a,'details','');add(trace,'summary','核对该条原文');(i.source_refs||[]).forEach(ref=>{add(trace,'blockquote',ref.quote);add(trace,'div',`来源日期：${ref.record_date||'未知'} · 发生日期：${i.occurred_on||'未知或近期汇总'} · block ${ref.block_id}`,'text-small');});});
+(r.source_section_coverage||[]).forEach(section=>{add(el('pu-coverage'),'div',`${section.section}：${section.cited_block_ids.length?'有引用条目':'未形成引用条目，需人工判断是否遗漏'}`,'pu-entry');});
+if(!(r.source_section_coverage||[]).length)add(el('pu-coverage'),'div','此旧版样例未记录章节覆盖，保留原内容。');
+(r.request?.research_questions||[]).forEach(q=>{const a=add(el('pu-needs'),'div','','pu-entry');const parts=(r.need_details||[]).filter(n=>n.question_id===q.id);
+if(parts.length){parts.forEach(n=>{add(a,'div','研究问题：'+n.research_question);if(n.method_needed)add(a,'div','所需方法：'+n.method_needed);add(a,'div','下一步决策（建议）：'+n.next_decision);if(n.constraints.length)add(a,'div','建议遵守的条件：'+n.constraints.join('；'),'text-small');});}
+else{add(a,'div',q.description);}
+add(a,'div','上述问题与方法属于建议，不是原文已证实结论；下方按钮只追溯提出问题的依据。','text-small');
+q.source_refs.forEach((ref,i)=>{const b=add(a,'button',`核对原文 ${i+1}`,'btn');b.type='button';b.addEventListener('click',()=>displayRef(ref));});});
+if(!r.request)add(el('pu-needs'),'div','没有可派发的论文需求');
+if(r.request)add(el('pu-needs'),'div','建议检索词：'+r.request.queries.join('；'),'text-small');
+Object.entries(r.source_refs||{}).forEach(([id,ref])=>{const a=add(el('pu-evidence'),'div','','pu-entry');a.dataset.ref=id;add(a,'div',`日报 ${ref.record_date||'未注明'} · 源修改 ${ref.source_modified_at||'未知'} · 同步 ${ref.synced_at}`,'text-small');add(a,'blockquote',ref.quote);add(a,'div',(ref.locator?.section||'')+' · block '+ref.block_id,'text-small');});
+c.records.forEach(rec=>{const d=add(el('pu-inputs'),'details','');add(d,'summary',`${rec.record_date||'无日期'} · ${rec.blocks.length}个文本块`);rec.blocks.forEach(b=>{const p=add(d,'div','','pu-entry');add(p,'div',b.block_id,'text-small');add(p,'div',b.text);});});
+verdict.value=s.verdict||'unreviewed';note.value=s.note||'';
+root.querySelectorAll('[data-check]').forEach(n=>n.checked=!!s.checks?.[n.dataset.check]);
+el('pu-review').textContent=JSON.stringify(data.independent_review||{status:'pending',scope:'独立子智能体验收尚在进行；此页面不自动判定科研质量通过'},null,2)+'\n\n历史快照为事后导出，未核实当时修订版本；非文本未读。此页展示人工固定oracle输出，不能证明真实模型理解质量。人工勾选只记录本地审阅，不启用反馈学习。';
+}
+function save(){reviews[selected]={verdict:verdict.value,note:note.value,checks:Object.fromEntries([...root.querySelectorAll('[data-check]')].map(n=>[n.dataset.check,n.checked]))};window.openai?.setWidgetState?.({modelContent:{date:selected,verdict:verdict.value},privateContent:{review_version:data.review_version,reviews}}).catch(()=>{});}
+day.addEventListener('change',()=>{selected=day.value;render();save()});
+verdict.addEventListener('change',save);note.addEventListener('change',save);root.querySelectorAll('[data-check]').forEach(n=>n.addEventListener('change',save));
+el('pu-export').addEventListener('click',()=>{save();el('pu-export-label').hidden=false;el('pu-export-text').value=JSON.stringify({schema_version:'1',review_version:data.review_version,validation:'human_review_of_offline_oracle',reviewed_at:new Date().toISOString(),reviews,previous_review:data.human_review_original||null},null,2);el('pu-export-text').focus();el('pu-export-text').select();});
+window.addEventListener('openai:set_globals',e=>{const s=e.detail?.globals?.widgetState;if(s?.privateContent?.review_version===data.review_version&&s.privateContent.reviews)reviews=s.privateContent.reviews;if(data.cases.some(c=>c.id===s?.modelContent?.date)){selected=s.modelContent.date;day.value=selected;}render();});
+render();
+})();
+</script>

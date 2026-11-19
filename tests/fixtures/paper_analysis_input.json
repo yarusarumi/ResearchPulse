@@ -1,0 +1,13 @@
+{
+  "paper": {"paper_id": "arxiv:2610.40637", "paper_version": "v1", "title": "World2Vec", "abstract": null,
+    "fulltext_links": ["https://arxiv.org/html/2610.40637v1"]},
+  "request": {
+    "request_id": "analysis-demo-20261103", "schema_version": "1", "user_id": "offline-reviewer",
+    "mode": "progress", "project_id": "demo", "direction_id": null,
+    "as_of": "2026-11-03T22:00:00+08:00", "timezone": "Asia/Shanghai",
+    "trigger": {"source_id": "offline-fixture", "version": "1", "time": "2026-11-03T22:00:00+08:00"},
+    "research_questions": [{"id": "q1", "description": "哪些实验条件支持世界模型的控制与泛化结论？", "priority": 1,
+      "source_refs": ["offline-fixture:q1"]}],
+    "queries": [], "constraints": {}, "publication_window": null, "max_recommendations": 1
+  }
+}

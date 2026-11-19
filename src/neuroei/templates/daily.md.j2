@@ -1,0 +1,58 @@
+# 今日文献进展 · {{ report_date }}
+{% if experimental %}**实验策略版本：结果不进入正式推荐，仅供比较。**
+{% endif %}{% if preview %}**预览版本：项目档案尚未确认。**
+{% endif %}
+{% if recommendations %}本期从公开来源检索到 {{ papers|length }} 篇候选，保留 {{ recommendations|length }} 篇值得阅读的论文。推荐依据是已取得的标题与摘要；缺少摘要的条目仅作线索，结论与数字请以原文为准。{% if reading_report_included is false %}本期没有完成正文分析。{% endif %}
+{% elif papers %}本期检索到 {{ papers|length }} 篇候选，没有保留符合当前关注方向的论文。这是筛选结果，不代表该主题没有相关研究。
+{% else %}本期没有检索到候选论文。这不代表没有相关研究，可能是检索条件过窄，或来源暂时不可用。
+{% endif %}{% if context_kind == 'direction' %}推荐只描述论文自身的实验条件；若你的研究具备这些条件，才可考虑迁移。
+{% endif %}
+{% if sources %}
+## 检索覆盖
+
+| 来源 | 检索词 | 状态 | 结果数 | 时间范围 | 说明 |
+|---|---|---|---:|---|---|
+{% for source in sources %}| {{ source.source|source_label }} | {{ source.query }} | {{ source.status|status_label }} | {{ source.papers|length }} | {{ source.since }} — {{ source.until }} | {{ '达到条数上限，结果可能不完整' if (source.truncated is defined and source.truncated) else ('来源访问失败' if source.status == 'failed' else '—') }} |
+{% endfor %}
+{% if sources|selectattr('status', 'equalto', 'failed')|list|length == sources|length %}**所有来源都没能访问：这是运行故障，不能据此判断今天没有新论文。**
+{% endif %}
+{% endif %}
+{% if recommendations %}## 推荐阅读
+
+{% for rec in recommendations %}{% set paper = lookup[rec.paper_id] %}### {{ loop.index }}. {{ paper.title|replace('\n', ' ') }}
+
+{{ rec.reason }}
+
+[打开论文原文]({{ paper.url }}){% if paper.authors %} · {{ paper.authors|join('、') }}{% if paper.authors|length > 6 %} 等{% endif %}{% endif %} · {{ paper.published|date_only }} · {% if paper.is_preprint %}预印本{% else %}索引记录{% endif %}
+
+{% if not paper.abstract %}**未取得摘要；推荐仅为题目线索，不代表已了解方法、结果或迁移条件。**
+{% endif %}{% if reading_statuses is not none and reading_statuses.get(paper.paper_id, {}).get('status') == 'completed' %}{% set assurance = reading_statuses[paper.paper_id].assurance %}{% if assurance.get('source_integrity', {}).get('status') == 'incomplete' %}**来源正文不完整，官方 PDF 补读未完成；下述分析仅覆盖已取得片段。**
+{% elif assurance.get('source_integrity', {}).get('status') == 'pdf_text_fallback' %}HTML 来源不完整，已改读官方 PDF 文本；图像和表格行列仍需人工核对。
+{% endif %}{% if assurance.selected_blocks is not none and assurance.accepted_count is not none %}以上判断来自摘要。{% if reading_statuses[paper.paper_id].get('reader') == 'cached_direction_analysis' %}沿用{% if reading_statuses[paper.paper_id].get('analysis_date') %} {{ reading_statuses[paper.paper_id].analysis_date }} 的{% else %}已有{% endif %}分析，本期未重新阅读；延续关注，不计作本期新增证据。此前读取正文选段 {% else %}本期读了正文选段 {% endif %}{{ assurance.selected_blocks }} 段，保留 {{ assurance.accepted_count }} 条有原文依据的结论；数字只核对了字面出现，单位与实验条件仍需人工确认。{% if assurance.degraded %}这篇是精简分析：模型输出被截断后仅重试保留了核心结论，细节需读原文确认。{% endif %}
+{% else %}以上判断来自摘要。{% if reading_statuses[paper.paper_id].get('reader') == 'cached_direction_analysis' %}沿用{% if reading_statuses[paper.paper_id].get('analysis_date') %} {{ reading_statuses[paper.paper_id].analysis_date }} 的{% else %}已有{% endif %}分析，本期未重新阅读；{% else %}本期做了正文分析；{% endif %}数字只核对了字面出现，单位与实验条件仍需人工确认。{% if assurance.degraded %}这篇是精简分析：模型输出被截断后仅重试保留了核心结论，细节需读原文确认。{% endif %}
+{% endif %}
+{% else %}以上判断来自{{ '摘要' if paper.abstract else '标题元数据' }}，本期没有做正文分析；方法适用条件与结论强度需读原文确认。
+{% endif %}
+{% endfor %}{% endif %}
+{% if context_kind == 'direction' and project.facts and project.facts|selectattr('kind', 'equalto', 'question')|list %}## 本期关注的问题
+
+{% for fact in project.facts if fact.kind == 'question' %}- {{ fact.text }}
+{% endfor %}
+{% endif %}
+{% if recommendations %}## 反馈
+
+可以在论文下标记「相关 / 不相关 / 暂后读 / 已读或已知 / 方法不适用」，反馈不会自动修改关注方向。
+
+## 下一步
+
+- 挑选一两篇打开原文，确认方法与实验条件是否适用于当前项目。
+- 页面上的「数据来源」可以看到本次每个来源的覆盖情况。
+{% elif papers %}## 下一步
+
+- 本期有候选，但没有达到推荐标准；可以检查关注问题与检索词是否过窄。
+- 空结果不等于没有相关研究。
+{% else %}## 下一步
+
+- 先确认来源是否可访问，再检查检索词与关注问题。
+- 空结果不等于没有相关研究。
+{% endif %}

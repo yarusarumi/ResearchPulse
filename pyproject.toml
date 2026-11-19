@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "researchpulse"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Project-grounded literature research adapters; draft only"
+dependencies = [
+    "pydantic>=2.10,<3",
+    "httpx>=0.28,<1",
+    "jinja2>=3.1,<4",
+    "tzdata>=2024.1",
+    "rank-bm25>=0.2.2,<1",
+    "paramiko>=3.4,<5",
+    "cryptography>=43,<51",
+    "pypdf==6.10.0",
+]
+
+[project.optional-dependencies]
+paperflow = ["paperflow"]
+supplements = ["pypdf==6.10.0"]
+orchestration = [
+    "prefect>=3,<4",
+]
+# Readers/weights are resolved and validated on the verified server, not the desktop.
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.14", "pypdf==6.10.0"]
+
+[project.scripts]
+neuroei = "neuroei.cli:main"
+
+[tool.uv.sources]
+paperflow = { git = "https://github.com/OpenRaiser/PaperFlow", rev = "4a835e737490785b3ce51025c85b630cd224318c" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neuroei"]
+
+[tool.ruff]
+line-length = 110
+

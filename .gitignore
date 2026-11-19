@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+dist/
+data/
+*.sqlite*
+*.dpapi
+.env
+.env.*
+auth.json
+model-settings.json
+browser-open.json
+csrf-tokens.json
+*.log
+*.zip

@@ -1,0 +1,51 @@
+# ResearchPulse
+
+ResearchPulse 是面向研究项目的文献工作台。它从科研日报整理项目背景和研究问题，检索相关论文，并将推荐理由、全文引文和深读建议保存在本机。
+
+## 下载和启动
+
+当前提供 **Windows x64 便携版**，适用于 64 位 Windows 电脑。发布包约 785 MB，自带 Python、Docling 和 CPU 运行组件。[GitHub Releases](https://github.com/yarusarumi/ResearchPulse/releases/latest)
+
+1. 下载发布页中的 Windows x64 ZIP，完整解压到你选择的目录。
+2. 双击 `启动研究台.cmd`。浏览器会打开本机工作台 `http://localhost:8768/`。
+3. 在右上角打开「模型设置」，接通 Codex 或 DeepSeek。
+4. 首次使用推荐和深读前，联网双击 `安装 BGE-M3.cmd`，下载约 **2.3 GB** 的语义检索权重。完成后重启研究台。
+
+解压到哪里就在哪里运行。项目、历史记录和下载的检索权重存放在解压目录的 `data` 文件夹。升级时，先退出研究台，再将旧版的 `data` 复制到新版目录。更换电脑或 Windows 用户后，需要重新配置被当前用户保护的凭据。
+
+## 连接模型
+
+- **Codex**。先安装 Codex CLI，再在研究台点击「登录 Codex」。在 OpenAI 打开的浏览器页面完成登录，然后回到研究台刷新模型列表。可选择账号提供的模型和推理强度，也可跟随 Codex 默认模型。切换账号同样通过官方登录页完成。[Codex CLI 安装说明](https://developers.openai.com/codex/cli/)
+- **DeepSeek**。在「模型设置」中输入自己的 API Key，保存后测试连接。密钥由 Windows 当前用户的凭据保护保存。
+- **共同配置**。可以指定默认使用的服务。启用备用调用后，Codex 明确报额度用尽时，任务的后续文本分析可以改用 DeepSeek。
+
+模型推理由你选择的服务完成。分析所需的材料会提交给所选服务，Codex 的账号密码和验证码在 OpenAI 官方登录页输入。
+
+## 接入飞书日报
+
+1. 在所属飞书组织创建自己的企业自建应用。在「权限管理」按标识查找并开通 `drive:drive:readonly`、`docx:document:readonly` 和 `offline_access`。
+2. 在应用的「安全设置 → 重定向 URL」中添加 `http://localhost:8768/oauth/feishu/callback`。发布应用，并确保你的飞书账号在可用范围内。组织可能要求审批。
+3. 在研究台新建或编辑项目，进入「配置自己的飞书应用」，填写 App ID 和 App Secret。完成授权后，添加自己有权读取的飞书云空间文件夹。
+
+如果暂时没有飞书应用，也可以从本机导入日报。
+
+## 主要功能
+
+| 功能 | 用途 |
+| --- | --- |
+| 项目背景 | 从已导入的日报梳理研究目标、方法和已有证据。可以更新分析或手动编辑。 |
+| 日报分析 | 分析昨日日报或指定段落，结合原文依据生成可确认的研究问题。 |
+| 推荐与深读 | 按已确认的问题检索论文，查看推荐理由、全文引文和可用于下一轮实验的建议。 |
+| 关注方向与历史 | 维护长期研究方向，回看以往的推荐、深读和分析记录。 |
+| 每日检查 | 运行 `配置每日检查.cmd` 启用定时任务，然后在项目中开启「每天 5:00 自动检测」。任务按北京时间运行，要求当前 Windows 用户已登录，错过时间时可在稍后补检。流程自动确认研究问题并在本机保存结果。 |
+
+已有记录可以离线查看。飞书同步、查找论文和模型推理需要联网。工作台仅通过本机访问，程序的定时任务把结果保存在工作台，不发送邮件。
+
+## 源码和构建
+
+应用位于 `src/neuroei`，Windows 打包脚本位于 `scripts/build_desktop.py`。重新构建完整便携包需要 Windows x64 上的 CPython 3.12、`uv`、已安装的 CPU 阅读组件和固定版本的 PaperFlow wheel。运行下列命令可查看构建参数。PaperFlow 固定版本见 `pyproject.toml`。
+
+```powershell
+python deployment/desktop/install_readers.py --help
+python scripts/build_desktop.py --help
+```
