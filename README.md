@@ -15,7 +15,8 @@ ResearchPulse 是面向研究项目的文献工作台。它从科研日报整理
 
 ## 连接模型
 
-- **Codex**。先安装 Codex CLI，再在研究台点击「登录 Codex」。在 OpenAI 打开的浏览器页面完成登录，然后回到研究台刷新模型列表。可选择账号提供的模型和推理强度，也可跟随 Codex 默认模型。切换账号同样通过官方登录页完成。[Codex CLI 安装说明](https://developers.openai.com/codex/cli/)
+- **Codex**。先安装 Codex CLI，再在研究台点击「登录 Codex」。在 OpenAI 打开的浏览器页面完成登录，然后回到研究台刷新模型列表。可选择账号提供的模型和推理强度，也可跟随 Codex 默认模型。[Codex CLI 安装说明](https://developers.openai.com/codex/cli/)
+- **多个 Codex 账号**。经常切换账号时，推荐使用 CC Switch 管理并快速切换。切换后，回到研究台的「模型设置」，点击「刷新模型列表」，确认显示的是你要使用的账号，再启动新任务。也可以通过研究台的「重新登录或切换账号」打开 OpenAI 官方登录页。[CC Switch 中文说明](https://github.com/farion1231/cc-switch/blob/main/README_ZH.md)
 - **DeepSeek**。在「模型设置」中输入自己的 API Key，保存后测试连接。密钥由 Windows 当前用户的凭据保护保存。
 - **共同配置**。可以指定默认使用的服务。启用备用调用后，Codex 明确报额度用尽时，任务的后续文本分析可以改用 DeepSeek。
 
