@@ -41,6 +41,15 @@ button.primary{background:var(--accent);color:white;border-color:var(--accent)}b
         <label for="codex-speed">响应速度</label>
         <select id="codex-speed"></select>
     </div>
+    <label>Codex 图片识别并发
+        <select id="codex-image-workers" aria-describedby="codex-image-workers-help">
+            <option value="1">1 路</option>
+            <option value="2">2 路</option>
+            <option value="3">3 路</option>
+            <option value="4" selected>4 路（默认）</option>
+        </select>
+    </label>
+    <p id="codex-image-workers-help">适用于飞书日报图片，包括首次生成项目背景。遇到限流时，本次任务自动降到最多 2 路。</p>
     <label>DeepSeek API Key
         <input id="deepseek-key" type="password" maxlength="512" autocomplete="off">
     </label>
@@ -88,6 +97,8 @@ function render(state) {
     settings = {...settings, ...state};
     node('backend').value = settings.backend;
     node('fallback').checked = settings.fallback_enabled;
+    node('codex-image-workers').value = settings.codex_image_workers ?? 4;
+    node('codex-image-workers').disabled = !Number.isInteger(settings.codex_image_workers);
     if (!catalog) {
         codexLogin.disabled = !settings.codex_installed;
         refreshCodex.disabled = false;
@@ -204,6 +215,9 @@ form.onsubmit = event => {
     event.preventDefault();
     busy(async () => {
         const changes = {backend:node('backend').value, fallback_enabled:node('fallback').checked};
+        if (!node('codex-image-workers').disabled) {
+            changes.codex_image_workers = Number(node('codex-image-workers').value);
+        }
         if (changes.backend === 'sol-high' && catalog?.models.length) {
             changes.codex_model = codexModel.value;
             changes.codex_effort = codexEffort.value;

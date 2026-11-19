@@ -323,16 +323,16 @@ def execute_understanding(store, job, account, *, max_calls, should_stop=None):
 
             image_options['image_reader'] = transcribe
             if max_calls and ai_backend.selected() != 'deepseek':
-                image_client = ai_backend.text_client(LLMConfig(
+                image_client = ai_backend.journal_image_client(LLMConfig(
                     max_calls_per_run=max_calls, request_attempts=1, schema_repair_attempts=0,
-                    timeout_seconds=180), store, 'feishu-image:' + job['job_id'], backend=ai_backend.selected())
-                image_client.should_stop = should_stop
+                    timeout_seconds=180), store, 'feishu-image:' + job['job_id'],
+                    backend=ai_backend.selected(), should_stop=should_stop)
                 if getattr(image_client, 'supports_images', True):
                     image_options['sol_image_reader'] = partial(transcribe_sol, client=image_client)
                     if os.environ.get('NEUROEI_DESKTOP') == '1':
                         config = image_client.config
                         image_options.update(sol_policy=f'codex-transcript-v1:{config.model}:{config.reasoning_effort}',
-                                             sol_section=CODEX_SECTION)
+                                             sol_section=CODEX_SECTION, image_workers=config.max_concurrency)
             image_options['on_image_progress'] = lambda done, total, reused, document: save_job_progress(
                 store, job, 'reading_journal_images', None, done=done, total=total, reused=reused, document=document)
             if snapshot.get('analysis_mode') == 'daily':

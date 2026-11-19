@@ -18,7 +18,7 @@ CODEX_BACKENDS = {
     "astra-high": ("gpt-6-astra", "high"),
 }
 _CHECK_INTERVAL = 0.25
-_RETRYABLE = {"model_timeout", "model_service_unavailable"}
+_RETRYABLE = {"model_timeout", "model_service_unavailable", "model_rate_limited"}
 _RUN_OPTIONS = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
 CODEX_DEFAULT = "codex-default"
 
@@ -76,6 +76,8 @@ def _read_turn(output: bytes, returncode: int):
                 "usage_limit_reached", "usage limit", "insufficient_quota", "quota exhausted", "quota exceeded",
                 "exceeded your current quota", "insufficient balance", "billing limit", "credits exhausted")):
             raise ModelUnavailable("model_quota_exhausted", "Codex model quota is exhausted") from None
+        if any(term in failure for term in ("rate limit", "rate_limit", "too many requests", "status 429", "http 429")):
+            raise ModelFailure("Codex temporarily rate limited the request", reason="model_rate_limited")
         if "context_length_exceeded" in failure or "context window" in failure:
             raise ModelFailure("Model context window exceeded", reason="model_input_too_large")
         if "invalid_json_schema" in failure:

@@ -30,7 +30,7 @@ class LLMConfig(StrictModel):
     reasoning_effort: Literal["high"] = "high"
     request_attempts: int = Field(3, ge=1, le=3)
     schema_repair_attempts: int = Field(2, ge=0, le=2)
-    max_concurrency: int = Field(2, ge=1, le=2)
+    max_concurrency: int = Field(2, ge=1, le=4)
     max_calls_per_run: int = Field(20, ge=1, le=100)
     max_tokens: int = Field(8192, ge=256, le=393216)
     timeout_seconds: int = Field(120, ge=1, le=1800)

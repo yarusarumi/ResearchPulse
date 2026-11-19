@@ -45,7 +45,7 @@ def codex_portal(tmp_path, monkeypatch):
         return {**settings, **data}
 
     settings = {'backend': 'sol-high', 'codex_installed': True, 'deepseek_configured': False,
-                'fallback_enabled': False, 'codex_model': '', 'codex_effort': ''}
+                'fallback_enabled': False, 'codex_model': '', 'codex_effort': '', 'codex_image_workers': 4}
     monkeypatch.setattr(desktop_models, 'codex_catalog', catalog, raising=False)
     monkeypatch.setattr(desktop_models, 'start_codex_login', login, raising=False)
     monkeypatch.setattr(desktop_models, 'save', save)
@@ -108,3 +108,4 @@ def test_codex_login_and_model_picker_in_edge(codex_portal):
     assert [entry['codex_model'] for entry in saves] == ['example-strong', '']
     assert [entry['codex_effort'] for entry in saves] == ['high', 'medium']
     assert [entry['codex_fast'] for entry in saves] == [False, True]
+    assert [entry['codex_image_workers'] for entry in saves] == [4, 3]

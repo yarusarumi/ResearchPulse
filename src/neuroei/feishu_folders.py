@@ -596,7 +596,7 @@ def freeze_folder(store, account, binding, as_of, mode):
 
 
 def folder_batch(store, account, project_id, binding, manifest, as_of, *, image_reader=None, image_day=None,
-                 on_image_progress=None, image_workers=IMAGE_WORKERS, only_image_ids=None, sol_image_reader=None,
+                 on_image_progress=None, image_workers=None, only_image_ids=None, sol_image_reader=None,
                     should_stop=None, grant_id=None, include_attachments=True, completed_attachments=None,
                     attachments_only=False, sol_policy=SOL_POLICY, sol_section=SOL_SECTION):
     run = {'source_id': 'feishu-folder:' + folder_url(binding['url'])[1], 'status': 'read'}
@@ -609,7 +609,7 @@ def folder_batch(store, account, project_id, binding, manifest, as_of, *, image_
         return batch
     client = None
     image_coverage = Counter()
-    workers = min(image_workers, 2) if sol_image_reader else image_workers
+    workers = image_workers if image_workers is not None else (2 if sol_image_reader else IMAGE_WORKERS)
     pool = ThreadPoolExecutor(max_workers=workers) if image_reader and workers > 1 else None
 
     def add_record(row, source_id, recorded, blocks):
@@ -649,6 +649,17 @@ def folder_batch(store, account, project_id, binding, manifest, as_of, *, image_
             except Exception:  # noqa: BLE001 - One bad image must not discard the readable batch.
                 return None, OCR_SECTION
 
+        def recognize_and_cache(key, sol_key, token, cached_ocr):
+            text, section = recognize(token, cached_ocr)
+            if text is not None and not store.read_only:
+                if section == sol_section:
+                    store.put('feishu_image_sol', sol_key,
+                              {'user_id': account['user_id'], 'project_id': project_id, 'text': text})
+                elif cached_ocr is None:
+                    store.put('feishu_image_ocr', key,
+                              {'user_id': account['user_id'], 'project_id': project_id, 'text': text})
+            return text or '', section
+
         keys, pending, known = [], {}, {}
         for image in images:
             token = image['token']
@@ -665,26 +676,22 @@ def folder_batch(store, account, project_id, binding, manifest, as_of, *, image_
                 if sol_text:
                     known[key] = sol_text, sol_section
                 elif sol_image_reader or ocr_text is None:
-                    pending[key] = token, ocr_text
+                    pending[key] = (key, sol_key, token, ocr_text)
                 else:
                     known[key] = ocr_text, OCR_SECTION
         cached_keys = frozenset(known)
 
         def results_in_order():
             parallel = pool and len(pending) >= (2 if sol_image_reader else IMAGE_PARALLEL_MIN)
-            results = {key: pool.submit(recognize, *candidate) for key, candidate in pending.items()} if parallel else {}
+            results = {key: pool.submit(recognize_and_cache, *candidate)
+                       for key, candidate in pending.items()} if parallel else {}
             for pair in keys:
                 if pair is None:
                     yield '', OCR_SECTION, False
                     continue
-                key, sol_key = pair
+                key, _ = pair
                 if key not in known:
-                    text, section = results[key].result() if parallel else recognize(*pending[key])
-                    known[key] = text or '', section
-                    if text is not None and not store.read_only:
-                        kind, cache_key = ('feishu_image_sol', sol_key) if section == sol_section else ('feishu_image_ocr', key)
-                        if section == sol_section or pending[key][1] is None:
-                            store.put(kind, cache_key, {'user_id': account['user_id'], 'project_id': project_id, 'text': text})
+                    known[key] = results[key].result() if parallel else recognize_and_cache(*pending[key])
                 yield *known[key], key in cached_keys
 
         return sum(pair is not None and pair[0] in cached_keys for pair in keys), results_in_order()
@@ -803,7 +810,7 @@ def folder_batch(store, account, project_id, binding, manifest, as_of, *, image_
         run.update(status='partial' if batch['records'] else 'failed', error='feishu_folder_unavailable')
     finally:
         if pool:
-            pool.shutdown()
+            pool.shutdown(cancel_futures=True)
         if client:
             client.close()
     if image_coverage:

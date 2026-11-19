@@ -1,5 +1,6 @@
 """Progress is per document and starts with the matching saved image results."""
 from contextlib import closing
+from threading import Event
 
 from neuroei import feishu_folders
 from neuroei.store import Store
@@ -50,6 +51,25 @@ def test_image_progress_starts_from_cache_when_retried(tmp_path, monkeypatch):
         feishu_folders.folder_batch(*args, documents, stamp, **readers,
                                     on_image_progress=lambda *entry: timeline.append(entry))
 
-    assert downloads == ['doc1img1', 'doc1img2', 'doc2img1']
-    assert timeline == [(1, 2, 1, '日报一'), (2, 2, 1, '日报一'),
-                        (0, 1, 0, '日报二'), (1, 1, 0, '日报二')]
+        assert downloads == ['doc1img1', 'doc1img2', 'doc2img1']
+        assert timeline == [(1, 2, 1, '日报一'), (2, 2, 1, '日报一'),
+                            (0, 1, 0, '日报二'), (1, 1, 0, '日报二')]
+
+        second_cached = Event()
+        put = store.put
+
+        def watch_cache(kind, key, body, **kwargs):
+            put(kind, key, body, **kwargs)
+            if kind == 'feishu_image_sol' and body['text'] == 'doc1img2':
+                second_cached.set()
+
+        def slow_first_image(data):
+            if data == 'doc1img1':
+                assert second_cached.wait(3)
+            return data
+
+        monkeypatch.setattr(store, 'put', watch_cache)
+        other_project = (store, args[1], 'another-project', args[3])
+        feishu_folders.folder_batch(*other_project, documents[:1], stamp, image_reader=str,
+                                    sol_image_reader=slow_first_image, image_workers=4)
+        assert second_cached.is_set()

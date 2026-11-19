@@ -35,7 +35,7 @@ def test_deepseek_only_uses_dpapi_key_after_new_process(profile, tmp_path, monke
     saved = desktop_models.save(profile, {'deepseek_api_key': key})
     assert saved == {'backend': 'deepseek', 'codex_installed': False, 'deepseek_configured': True,
                      'fallback_enabled': False, 'codex_model': '', 'codex_effort': '', 'codex_supports_images': True,
-                     'codex_fast': False}
+                     'codex_fast': False, 'codex_image_workers': 4}
     assert key not in (profile / 'model-settings.json').read_text(encoding='utf-8')
     assert key not in json.dumps(saved)
     assert 'DEEPSEEK_API_KEY' not in os.environ
@@ -143,6 +143,28 @@ def test_codex_catalog_choice_reaches_job_and_preserves_image_capability(profile
         desktop_models.save(profile, {'codex_model': '', 'codex_effort': 'high', 'codex_fast': True})
         configured = ai_backend.model_config(LLMConfig(), ai_backend.selected())
         assert (configured.model, configured.reasoning_effort, configured.service_tier) == ('codex-default', 'high', 'fast')
+    finally:
+        store.close()
+
+
+def test_image_workers_are_saved_and_captured_when_task_starts(profile, tmp_path):
+    assert desktop_models.load(profile)['codex_image_workers'] == 4
+    for invalid in (0, 5, True, '4'):
+        with pytest.raises(ValueError, match='1–4'):
+            desktop_models.save(profile, {'codex_image_workers': invalid})
+    store = Store(tmp_path / 'store')
+    try:
+        with ai_backend.task_selection(lambda: None):
+            desktop_models.save(profile, {'codex_image_workers': 3})
+            images = ai_backend.journal_image_client(LLMConfig(), store, 'images', backend='sol-high', should_stop=None)
+            assert images.config.max_concurrency == 4
+            images.close()
+        assert desktop_models.save(profile, {})['codex_image_workers'] == 3
+        images = ai_backend.journal_image_client(LLMConfig(), store, 'images', backend='sol-high', should_stop=None)
+        text = ai_backend.text_client(LLMConfig(), store, 'text', backend='sol-high')
+        assert images.config.max_concurrency == 3 and text.config.max_concurrency == 2
+        images.close()
+        text.close()
     finally:
         store.close()
 

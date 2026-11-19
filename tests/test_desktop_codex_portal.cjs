@@ -23,6 +23,9 @@ async function run() {
         const model = page.getByLabel('Codex 模型', {exact:true});
         const effort = page.getByLabel('推理强度', {exact:true});
         const speed = page.getByLabel('响应速度', {exact:true});
+        const imageWorkers = page.getByLabel('Codex 图片识别并发');
+        assert.equal(await imageWorkers.inputValue(), '4');
+        assert.deepEqual(await imageWorkers.locator('option').evaluateAll(nodes => nodes.map(option => option.value)), ['1','2','3','4']);
         await model.selectOption('example-strong');
         assert.deepEqual(await effort.locator('option').evaluateAll(nodes => nodes.map(option => option.value)), ['', 'medium', 'high']);
         assert.deepEqual(await effort.locator('option').allTextContents(), ['跟随模型默认值','中（medium）','高（high）']);
@@ -36,6 +39,7 @@ async function run() {
         await model.selectOption('');
         await effort.selectOption('medium');
         await speed.selectOption('fast');
+        await imageWorkers.selectOption('3');
         await Promise.all([page.waitForResponse(saved), save.click()]);
         await page.getByText('已保存，对下次启动的任务生效。', {exact:true}).waitFor();
         await page.getByRole('button', {name:'重新登录或切换账号', exact:true}).click();

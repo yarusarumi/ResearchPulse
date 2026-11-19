@@ -26,7 +26,9 @@ class FakeStore:
 @pytest.mark.parametrize(('message', 'expected'), [
     ("You've hit your usage limit", 'model_quota_exhausted'),
     ('insufficient_quota', 'model_quota_exhausted'),
-    ('rate limit temporarily exceeded', 'model_service_unavailable'),
+    ('rate limit temporarily exceeded', 'model_rate_limited'),
+    ('unexpected status 429 Too Many Requests', 'model_rate_limited'),
+    ('HTTP 429 usage_limit_reached', 'model_quota_exhausted'),
     ('maximum output tokens exceeded', 'output_truncated'),
 ])
 def test_quota_is_distinct_from_transient_or_request_limits(message, expected):
