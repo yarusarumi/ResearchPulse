@@ -4,6 +4,7 @@ import json
 import re
 from datetime import date, datetime, time, timedelta
 from typing import Literal
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from pydantic import AwareDatetime, Field, PrivateAttr, model_validator
@@ -801,9 +802,14 @@ def _understand(store, extractor, batch, user, project, as_of, bootstrap, max_ca
         if (cached.get("batch_gaps") or {}).get("stop_reason") != "canceled_by_user":
             return {**cached, "dispatch_recommendation": False, "reused": True}
         run = identity(["restart-after-cancel", run])
-    # Mark before calling: interruptions or invalid output cannot trigger unbounded paid replay.
-    if _get(store, "understanding_attempt", run):
+    attempt = _get(store, "understanding_attempt", run)
+    resumable = imported_at is not None and retry_of is None
+    resume = _get(store, "understanding_resume", run) if resumable else None
+    if attempt and resume is None:
         return {**base, "status": "failed", "reason": "prior_attempt_requires_review", "run_id": run}
+    # Require progress before another paid resume, while allowing fully saved work to finalize.
+    can_call = not attempt or resume["latest"] != resume["last_resumed"]
+    execution = uuid4().hex if attempt else None
     image_ids = {record.source_id for record in eligible if ':image:' in record.source_id
                  and all(is_image_transcript(block.section) for block in record.blocks)}
     deferred_images = set()
@@ -842,8 +848,14 @@ def _understand(store, extractor, batch, user, project, as_of, bootstrap, max_ca
         store.put("understanding_retry", retry_key, {"retry_of": retry_of, "run_id": run,
             "batch_signature": batch_signature, "bootstrap": bootstrap,
             "configuration_version": base["execution_metadata"]["configuration_version"]}, immutable=True)
-    store.put("understanding_attempt", run, {"as_of": as_of.isoformat(), "chunks": len(chunks),
-        "batch_signature": batch_signature, "bootstrap": bootstrap}, immutable=True)
+    if resumable:
+        resume = resume if attempt else {"batches": {}, "latest": None, "last_resumed": ""}
+        if attempt:
+            resume["last_resumed"] = resume["latest"]
+        store.put("understanding_resume", run, resume)
+    if not attempt:
+        store.put("understanding_attempt", run, {"as_of": as_of.isoformat(), "chunks": len(chunks),
+            "batch_signature": batch_signature, "bootstrap": bootstrap}, immutable=True)
     new_state = json.loads(json.dumps(state))
     originals = {r.source_id: r for r in eligible}
     questions, queries, constraints, all_reviews = [], [], [], []
@@ -857,6 +869,7 @@ def _understand(store, extractor, batch, user, project, as_of, bootstrap, max_ca
     failed_blocks = {}
     accepted_blocks = {}
     accepted = 0
+    resumed = 0
     stopped = None
 
     def mark_failed(records):
@@ -864,14 +877,14 @@ def _understand(store, extractor, batch, user, project, as_of, bootstrap, max_ca
             failed_blocks.setdefault(record.source_id, set()).update(b.block_id for b in record.blocks)
 
     def model_calls():
-        return index if initial_calls is None else client.calls - initial_calls
+        return index - resumed if initial_calls is None else client.calls - initial_calls
 
     try:
         while index < len(chunks):
             if should_stop and should_stop():
                 stopped = "canceled_by_user"
                 break
-            if max(index, model_calls()) >= max_calls:
+            if max(index - resumed, model_calls()) >= max_calls:
                 stopped = "model_budget_insufficient"
                 break
             records = chunks[index]
@@ -909,82 +922,117 @@ def _understand(store, extractor, batch, user, project, as_of, bootstrap, max_ca
             if (not getattr(extractor, "bounds_model_input", False) and
                     len(json.dumps(payload, ensure_ascii=False)) > MAX_UNDERSTANDING_INPUT_CHARS):
                 raise UnderstandingContextBudgetExceeded("state_context_budget_exceeded")
-            provider_ref = None
-            try:
+            signature = None
+            cached_batch = None
+            if resume is not None:
+                # Ignore poll/restart observation times. Pin source content, locators, recorded dates and prior claims.
+                signature = identity([
+                    {key: value for key, value in payload.items() if key not in ("as_of", "input_event", "journals")},
+                    [{key: value for key, value in journal.items() if key not in ("available_at", "synced_at")}
+                     for journal in payload["journals"]],
+                ])
+                saved = resume["batches"].get(str(index))
+                if saved and saved["signature"] == signature:
+                    cached_batch = store.get("understanding_extraction", saved["artifact"])
+            if cached_batch:
+                extraction = UnderstandingExtraction.model_validate(cached_batch["extraction"])
+                packed = cached_batch["packed"]
+                audit_ref = cached_batch["audit_ref"]
+                for key, field in (("provider_audit_refs", "provider_audit_ref"),
+                                   ("citation_resolution_refs", "citation_resolution_ref")):
+                    if ref := cached_batch.get(field):
+                        base[key].append(ref)
+                resumed += 1
+            else:
+                if not can_call:
+                    return {**base, "status": "failed", "reason": "prior_attempt_requires_review", "run_id": run}
+                artifact = f"{run}:{index}" if execution is None else f"{run}:{execution}:{index}"
+                provider_ref = resolution_ref = None
                 try:
-                    prepare_sources = getattr(extractor, "prepare_sources", None)
-                    if prepare_sources is not None:
-                        prepare_sources(records, list(originals.values()))
-                    extraction = UnderstandingExtraction.model_validate(extractor.extract(payload))
-                finally:
-                    provider_audit = getattr(extractor, "provider_audit", None)
-                    if provider_audit is not None:
-                        provider_ref = f"{run}:{index}"
-                        store.put("understanding_provider", provider_ref, {"schema_version": "1",
-                            "user_id": user, "project_id": project, "run_id": run,
-                            "request_id": "progress-" + run if may_request else None,
-                            "audit_ref": getattr(extractor, "audit_ref", None), **provider_audit}, immutable=True)
-                        base["provider_audit_refs"].append(provider_ref)
-                store.put("understanding_draft", f"{run}:{index}", {
-                    "extraction": extraction.model_dump(mode="json"),
-                    **({"origin": "canonical_from_span_selection", "provider_audit_ref": provider_ref} if provider_ref else {}),
-                    "audit_ref": getattr(extractor, "audit_ref", None)}, immutable=True)
-                extraction, resolutions = _resolve_source_quotes(extraction, records, list(originals.values()))
-                if resolutions:
-                    store.put("understanding_citation_resolution", f"{run}:{index}", {
-                        "schema_version": "1", "resolution_policy": QUOTE_RESOLUTION_POLICY,
-                        "extraction_policy": POLICY, "user_id": user, "project_id": project,
-                        "run_id": run, "request_id": "progress-" + run if may_request else None,
-                        "audit_ref": getattr(extractor, "audit_ref", None), "resolutions": resolutions}, immutable=True)
-                    base["citation_resolution_refs"].append(f"{run}:{index}")
-                _mark_image_observations(extraction, records)
-                extraction = _validate_extraction(extraction, records, new_state["items"])
-            except UnderstandingContextBudgetExceeded:
-                raise
-            except (ValueError, RuntimeError, OSError, KeyError) as exc:
-                code = None
-                if isinstance(exc, ModelFailure):
-                    code = ("model_output_truncated" if
-                            getattr(getattr(extractor, "client", None), "last_finish_reason", None) == "length"
-                            else "extraction_failed")
-                if isinstance(exc, ModelUnavailable):
-                    code = stopped = exc.reason
-                if isinstance(exc, UnusableExtraction):
-                    code = "no_usable_evidence"
-                failed_batches.append({"index": index, "error": code if isinstance(exc, ModelFailure) else str(exc),
-                                       **({"code": code} if code else {})})
-                mark_failed(records)
-                base["warnings"].append(f"extraction_failed_batch:{index}")
-                index += 1
-                if stopped:
-                    break
-                continue
-            store.put("understanding_extraction", f"{run}:{index}", {
-                "payload": payload, "extraction": extraction.model_dump(mode="json"),
-                "audit_ref": getattr(extractor, "audit_ref", None)}, immutable=True)
+                    try:
+                        prepare_sources = getattr(extractor, "prepare_sources", None)
+                        if prepare_sources is not None:
+                            prepare_sources(records, list(originals.values()))
+                        extraction = UnderstandingExtraction.model_validate(extractor.extract(payload))
+                    finally:
+                        provider_audit = getattr(extractor, "provider_audit", None)
+                        if provider_audit is not None:
+                            provider_ref = artifact
+                            store.put("understanding_provider", provider_ref, {"schema_version": "1",
+                                "user_id": user, "project_id": project, "run_id": run,
+                                "request_id": "progress-" + run if may_request else None,
+                                "audit_ref": getattr(extractor, "audit_ref", None), **provider_audit}, immutable=True)
+                            base["provider_audit_refs"].append(provider_ref)
+                    store.put("understanding_draft", artifact, {
+                        "extraction": extraction.model_dump(mode="json"),
+                        **({"origin": "canonical_from_span_selection", "provider_audit_ref": provider_ref} if provider_ref else {}),
+                        "audit_ref": getattr(extractor, "audit_ref", None)}, immutable=True)
+                    extraction, resolutions = _resolve_source_quotes(extraction, records, list(originals.values()))
+                    if resolutions:
+                        resolution_ref = artifact
+                        store.put("understanding_citation_resolution", resolution_ref, {
+                            "schema_version": "1", "resolution_policy": QUOTE_RESOLUTION_POLICY,
+                            "extraction_policy": POLICY, "user_id": user, "project_id": project,
+                            "run_id": run, "request_id": "progress-" + run if may_request else None,
+                            "audit_ref": getattr(extractor, "audit_ref", None), "resolutions": resolutions}, immutable=True)
+                        base["citation_resolution_refs"].append(resolution_ref)
+                    _mark_image_observations(extraction, records)
+                    extraction = _validate_extraction(extraction, records, new_state["items"])
+                except UnderstandingContextBudgetExceeded:
+                    raise
+                except (ValueError, RuntimeError, OSError, KeyError) as exc:
+                    code = None
+                    if isinstance(exc, ModelFailure):
+                        code = ("model_output_truncated" if
+                                getattr(getattr(extractor, "client", None), "last_finish_reason", None) == "length"
+                                else "extraction_failed")
+                    if isinstance(exc, ModelUnavailable):
+                        code = stopped = exc.reason
+                    if isinstance(exc, UnusableExtraction):
+                        code = "no_usable_evidence"
+                    failed_batches.append({"index": index, "error": code if isinstance(exc, ModelFailure) else str(exc),
+                                           **({"code": code} if code else {})})
+                    mark_failed(records)
+                    base["warnings"].append(f"extraction_failed_batch:{index}")
+                    index += 1
+                    if stopped:
+                        break
+                    continue
+                mapped = {item.id: f"{run}:{index}:{item.id}" for item in extraction.items}
+                packed = []
+                by_source = originals
+                for item in extraction.items:
+                    obj = item.model_dump(mode="json")
+                    obj["id"] = mapped[item.id]
+                    obj["temporal_status"] = "source_record_not_live_status"
+                    obj["source_refs"] = []
+                    for c in item.citations:
+                        source = by_source[c.source_id]
+                        block = next(b for b in source.blocks if b.block_id == c.block_id)
+                        locate = getattr(extractor, "citation_location", None)
+                        location = (locate(item.id, c, source) if locate is not None else
+                            {"quote_char_start": block.text.index(c.quote)})
+                        table_header = _table_header_for_quote(block.text, c.quote, location['quote_char_start'])
+                        obj["source_refs"].append({**c.model_dump(), "version": source.content_version,
+                        "document_id": block.document_id, "locator": block.model_dump(exclude={"text"}),
+                        **({"table_header": table_header} if table_header else {}),
+                        **location,
+                        "record_date": by_source[c.source_id].model_dump(mode="json")["record_date"],
+                        "source_modified_at": by_source[c.source_id].model_dump(mode="json")["source_modified_at"],
+                        "synced_at": by_source[c.source_id].synced_at.isoformat()})
+                    packed.append(obj)
+                audit_ref = getattr(extractor, "audit_ref", None)
+                artifact_data = {"payload": payload, "extraction": extraction.model_dump(mode="json"),
+                                 "audit_ref": audit_ref}
+                if resume is not None:
+                    artifact_data.update(packed=packed, provider_audit_ref=provider_ref,
+                                         citation_resolution_ref=resolution_ref)
+                store.put("understanding_extraction", artifact, artifact_data, immutable=True)
+                if resume is not None:
+                    resume["batches"][str(index)] = {"signature": signature, "artifact": artifact}
+                    resume["latest"] = artifact
+                    store.put("understanding_resume", run, resume)
             mapped = {item.id: f"{run}:{index}:{item.id}" for item in extraction.items}
-            packed = []
-            by_source = originals
-            for item in extraction.items:
-                obj = item.model_dump(mode="json")
-                obj["id"] = mapped[item.id]
-                obj["temporal_status"] = "source_record_not_live_status"
-                obj["source_refs"] = []
-                for c in item.citations:
-                    source = by_source[c.source_id]
-                    block = next(b for b in source.blocks if b.block_id == c.block_id)
-                    locate = getattr(extractor, "citation_location", None)
-                    location = (locate(item.id, c, source) if locate is not None else
-                        {"quote_char_start": block.text.index(c.quote)})
-                    table_header = _table_header_for_quote(block.text, c.quote, location['quote_char_start'])
-                    obj["source_refs"].append({**c.model_dump(), "version": source.content_version,
-                    "document_id": block.document_id, "locator": block.model_dump(exclude={"text"}),
-                    **({"table_header": table_header} if table_header else {}),
-                    **location,
-                    "record_date": by_source[c.source_id].model_dump(mode="json")["record_date"],
-                    "source_modified_at": by_source[c.source_id].model_dump(mode="json")["source_modified_at"],
-                    "synced_at": by_source[c.source_id].synced_at.isoformat()})
-                packed.append(obj)
             new_state["items"].extend(packed)
             for need in extraction.needs:
                 refs = [ref for i in packed if i["id"] in {mapped[k] for k in need.change_item_ids}
@@ -1003,7 +1051,7 @@ def _understand(store, extractor, batch, user, project, as_of, bootstrap, max_ca
                 need_details.append({"question_id": need.question_id, "research_question": need.description,
                     "method_needed": need.method_needed or None, "next_decision": need.next_decision,
                     "constraints": need.constraints, "source_refs": ref_ids,
-                    "epistemic": "inference", "producer_audit_ref": getattr(extractor, "audit_ref", None)})
+                    "epistemic": "inference", "producer_audit_ref": audit_ref})
                 questions.append(ResearchQuestion(id=need.question_id,
                     description=description,
                     priority={"high": 3, "medium": 2, "low": 1}[need.priority], source_refs=ref_ids))
@@ -1065,6 +1113,7 @@ def _understand(store, extractor, batch, user, project, as_of, bootstrap, max_ca
     if deferred_images:
         eligible = [record for record in eligible if record.source_id not in deferred_images]
         base['warnings'].append(f'feishu_image_analysis_pending:{len(deferred_images)}')
+    source_records = []
     for record in eligible:
         source_id = record.source_id
         incomplete = incomplete_sources.get(source_id, {})
@@ -1101,8 +1150,8 @@ def _understand(store, extractor, batch, user, project, as_of, bootstrap, max_ca
         else:
             new_state.get("incomplete_sources", {}).pop(source_id, None)
             new_state["sources"][source_id] = saved_source
-        store.put("understanding_source", f"{run}:{source_id}:{record.content_version}",
-                  record.model_dump(mode="json"), immutable=True)
+        source_records.append(("understanding_source", f"{run}:{source_id}:{record.content_version}",
+                               record.model_dump(mode="json")))
     new_state.update(version=run, as_of=as_of.isoformat(), parent_version=state["version"])
     new_state["superseded_ids"] = sorted(set(new_state["superseded_ids"]))
     projection = current_items(new_state)
@@ -1112,7 +1161,6 @@ def _understand(store, extractor, batch, user, project, as_of, bootstrap, max_ca
     missing = [kind for kind, ids in new_state["coverage"].items() if not ids]
     if missing:
         base["warnings"].append("no_sourced_items_for:" + ",".join(missing))
-    store.put("understanding_state", run, new_state, immutable=True)
     request = None
     if merged and may_request and stopped != "canceled_by_user":
         request = RecommendationRequest(request_id="progress-" + run, user_id=user, project_id=project,
@@ -1128,6 +1176,7 @@ def _understand(store, extractor, batch, user, project, as_of, bootstrap, max_ca
               "execution_metadata": {**base["execution_metadata"], "source_state_version": run},
               **({"image_analysis_pending": len(deferred_images)} if deferred_images else {}),
               **({"failed_batches": failed_batches} if failed_batches else {}),
+              **({"resumed_batches": resumed} if resumed else {}),
               **({"batch_gaps": batch_gaps} if failed_batches or stopped else {}),
               "status": "partial" if (deferred_images or unverified or failed_batches or stopped
                                        or batch.verified_document_gap) else "completed",
@@ -1154,10 +1203,11 @@ def _understand(store, extractor, batch, user, project, as_of, bootstrap, max_ca
                                "modified_at": r.model_dump(mode="json")["source_modified_at"],
                                "synced_at": r.synced_at.isoformat()} for r in eligible]},
               "model_calls": model_calls(), "reused": False}
-    # State pointer and terminal result commit together, reusing the existing Store database.
+    # Publish source snapshots, state and result together so an interruption can resume before publication.
     with store.transaction() as db:
-        for kind, key, body in (("understanding_head", scope, {"key": run}),
-                                ("understanding_run", run, result)):
+        for kind, key, body in [*source_records, ("understanding_state", run, new_state),
+                                ("understanding_head", scope, {"key": run}),
+                                ("understanding_run", run, result)]:
             db.execute("INSERT OR REPLACE INTO objects VALUES (?,?,?)",
                        (kind, key, json.dumps(body, ensure_ascii=False, sort_keys=True)))
     return result

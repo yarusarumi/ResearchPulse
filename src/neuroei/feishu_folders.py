@@ -354,15 +354,18 @@ class SharedFolder(Feishu):
             reused, readings = read_images([image for image, _ in eligible],
                                            lambda token: self._download_image(token, headers)) if eligible else (0, ())
             done = reused
+            checked = 0
             if eligible and on_image_progress:
                 on_image_progress(done, len(eligible), reused, row['name'])
-            for (image, recorded), (text, section, from_cache) in zip(eligible, readings, strict=True):
+            for (image, recorded), (text, section, cache_hit) in zip(eligible, readings, strict=True):
                 if should_stop and should_stop():
                     break
                 image_coverage['attempted'] += 1
-                if not from_cache:
+                if cache_hit != 'version':
                     done += 1
-                    if on_image_progress and ((done - reused) % 5 == 0 or done == len(eligible)):
+                    checked += 1
+                    reused += cache_hit == 'content'
+                    if on_image_progress and (checked % 5 == 0 or done == len(eligible)):
                         on_image_progress(done, len(eligible), reused, row['name'])
                 if not text:
                     image_coverage['unread'] += 1
@@ -619,46 +622,55 @@ def folder_batch(store, account, project_id, binding, manifest, as_of, *, image_
             'synced_at': now(), 'blocks': blocks})
 
     def cached_text(kind, key):
-        rows = store.select(kind, ('text',), key=key)
+        rows = store.select(kind, ('text', 'content_key'), key=key)
+        if rows and rows[0]['content_key']:
+            rows = store.select(kind, ('text',), key=rows[0]['content_key'])
         return rows[0]['text'] if rows else None
 
     def read_images(images, download):
-        def recognize(token, cached_ocr):
+        def recognize_and_cache(key, sol_key, token, cached_ocr):
             if should_stop and should_stop():
-                return None, OCR_SECTION
+                return '', OCR_SECTION, None
             try:
                 asset = download(token)
             except Exception:  # noqa: BLE001 - One bad image must not discard the readable batch.
-                return None, OCR_SECTION
+                return '', OCR_SECTION, None
             if asset['status'] != 'downloaded':
-                return None, OCR_SECTION
+                return '', OCR_SECTION, None
             data = asset['data']
+            fingerprint = sha256(data).hexdigest()
+            scope = {'user_id': account['user_id'], 'project_id': project_id}
+
+            def reuse_or_save(kind, version_key, policy, read):
+                content_key = sha256(':'.join(('content', scope['user_id'], project_id,
+                                              policy, fingerprint)).encode()).hexdigest()
+                text = cached_text(kind, content_key)
+                reused = text is not None
+                if not reused:
+                    text = read(data)
+                if text is not None and not store.read_only:
+                    if not reused:
+                        store.put(kind, content_key, {**scope, 'text': text})
+                    store.put(kind, version_key, {**scope, 'content_key': content_key})
+                return text, 'content' if reused else None
+
             if sol_image_reader:
                 try:
-                    text = sol_image_reader(data)
+                    text, hit = reuse_or_save('feishu_image_sol', sol_key, sol_policy,
+                                             lambda image: sol_image_reader(image) or None)
                 except (ModelFailure, OSError, ValueError):
                     text = None
                 if text:
-                    return text, sol_section
+                    return text, sol_section, hit
                 if should_stop and should_stop():
-                    return None, OCR_SECTION
+                    return '', OCR_SECTION, None
             if cached_ocr is not None:
-                return cached_ocr, OCR_SECTION
+                return cached_ocr, OCR_SECTION, None
             try:
-                return image_reader(data), OCR_SECTION
+                text, hit = reuse_or_save('feishu_image_ocr', key, OCR_POLICY, image_reader)
             except Exception:  # noqa: BLE001 - One bad image must not discard the readable batch.
-                return None, OCR_SECTION
-
-        def recognize_and_cache(key, sol_key, token, cached_ocr):
-            text, section = recognize(token, cached_ocr)
-            if text is not None and not store.read_only:
-                if section == sol_section:
-                    store.put('feishu_image_sol', sol_key,
-                              {'user_id': account['user_id'], 'project_id': project_id, 'text': text})
-                elif cached_ocr is None:
-                    store.put('feishu_image_ocr', key,
-                              {'user_id': account['user_id'], 'project_id': project_id, 'text': text})
-            return text or '', section
+                return '', OCR_SECTION, None
+            return text or '', OCR_SECTION, hit
 
         keys, pending, known = [], {}, {}
         for image in images:
@@ -674,11 +686,11 @@ def folder_batch(store, account, project_id, binding, manifest, as_of, *, image_
                 sol_text = cached_text('feishu_image_sol', sol_key) if sol_image_reader else None
                 ocr_text = None if sol_text else cached_text('feishu_image_ocr', key)
                 if sol_text:
-                    known[key] = sol_text, sol_section
+                    known[key] = sol_text, sol_section, 'version'
                 elif sol_image_reader or ocr_text is None:
                     pending[key] = (key, sol_key, token, ocr_text)
                 else:
-                    known[key] = ocr_text, OCR_SECTION
+                    known[key] = ocr_text, OCR_SECTION, 'version'
         cached_keys = frozenset(known)
 
         def results_in_order():
@@ -687,12 +699,12 @@ def folder_batch(store, account, project_id, binding, manifest, as_of, *, image_
                        for key, candidate in pending.items()} if parallel else {}
             for pair in keys:
                 if pair is None:
-                    yield '', OCR_SECTION, False
+                    yield '', OCR_SECTION, None
                     continue
                 key, _ = pair
                 if key not in known:
                     known[key] = results[key].result() if parallel else recognize_and_cache(*pending[key])
-                yield *known[key], key in cached_keys
+                yield known[key]
 
         return sum(pair is not None and pair[0] in cached_keys for pair in keys), results_in_order()
 

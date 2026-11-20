@@ -14,6 +14,9 @@ def test_image_progress_starts_from_cache_when_retried(tmp_path, monkeypatch):
                                      ('doc2', '日报二', '2026-11-18T08:00:00+08:00')]
     ]
     downloads = []
+    calls = []
+    revision = '1'
+    pixels = {}
 
     class LocalFolder(feishu_folders.SharedFolder):
         def __init__(self, *args, **kwargs):
@@ -26,26 +29,30 @@ def test_image_progress_starts_from_cache_when_retried(tmp_path, monkeypatch):
             return {row['token']: row for row in documents}
 
         def _read_document(self, key, headers, *, include_images=False):
-            return {'revision': '1', 'unread_items': [], 'blocks': [
-                {'block_id': key + 'text', 'section': '', 'text': '日报正文'}], 'image_blocks': [
-                {'token': key + suffix, 'document_id': key, 'revision': '1',
+            return {'revision': revision, 'unread_items': [], 'blocks': [
+                {'block_id': key + 'text', 'section': '', 'text': '日报正文 ' + revision}], 'image_blocks': [
+                {'token': key + suffix, 'document_id': key, 'revision': revision,
                  'block_id': key + suffix, 'section': '', 'caption': ''}
                 for suffix in (('img1', 'img2') if key == 'doc1' else ('img1',))
             ]}
 
         def _download_image(self, token, headers):
             downloads.append(token)
-            return {'status': 'downloaded', 'data': token}
+            return {'status': 'downloaded', 'data': pixels.get(token, token.encode())}
 
         def _get(self, path, headers=None):
-            return {'document': {'revision_id': '1'}}
+            return {'document': {'revision_id': revision}}
 
     monkeypatch.setattr(feishu_folders, 'SharedFolder', LocalFolder)
     with closing(Store(tmp_path)) as store:
         args = (store, {'user_id': 'researcher'}, 'project',
                 {'url': 'https://example.feishu.cn/drive/folder/journals'})
         stamp = '2026-11-19T12:00:00+08:00'
-        readers = {'image_reader': str, 'sol_image_reader': str, 'image_workers': 1}
+        def transcribe(data):
+            calls.append(data)
+            return data.decode()
+
+        readers = {'image_reader': bytes.decode, 'sol_image_reader': transcribe, 'image_workers': 1}
         feishu_folders.folder_batch(*args, documents[:1], stamp, only_image_ids=['doc1img1'], **readers)
         timeline = []
         feishu_folders.folder_batch(*args, documents, stamp, **readers,
@@ -55,18 +62,33 @@ def test_image_progress_starts_from_cache_when_retried(tmp_path, monkeypatch):
         assert timeline == [(1, 2, 1, '日报一'), (2, 2, 1, '日报一'),
                             (0, 1, 0, '日报二'), (1, 1, 0, '日报二')]
 
+        revision = '2'
+        pixels['doc1img2'] = b'replaced-image'
+        timeline.clear()
+        calls.clear()
+        updated = feishu_folders.folder_batch(*args, documents[:1], stamp, **readers,
+                                               on_image_progress=lambda *entry: timeline.append(entry))
+        assert calls == [b'replaced-image']
+        assert timeline == [(0, 2, 0, '日报一'), (2, 2, 1, '日报一')]
+        images = [r['blocks'][0] for r in updated['records'] if ':image:' in r['source_id']]
+        assert [(block['text'], block['revision']) for block in images] == [('doc1img1', '2'), ('replaced-image', '2')]
+        before = len(downloads)
+        feishu_folders.folder_batch(*args, documents[:1], stamp, **readers)
+        assert len(downloads) == before and calls == [b'replaced-image']
+
+        pixels.clear()
         second_cached = Event()
         put = store.put
 
         def watch_cache(kind, key, body, **kwargs):
             put(kind, key, body, **kwargs)
-            if kind == 'feishu_image_sol' and body['text'] == 'doc1img2':
+            if kind == 'feishu_image_sol' and body.get('text') == 'doc1img2':
                 second_cached.set()
 
         def slow_first_image(data):
-            if data == 'doc1img1':
+            if data == b'doc1img1':
                 assert second_cached.wait(3)
-            return data
+            return data.decode()
 
         monkeypatch.setattr(store, 'put', watch_cache)
         other_project = (store, args[1], 'another-project', args[3])

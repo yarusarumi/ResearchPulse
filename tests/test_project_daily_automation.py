@@ -144,6 +144,17 @@ def test_local_schedule_selects_all_questions_without_sending_email(workspace, m
     assert not mailbox
 
 
+def test_interrupted_background_job_can_be_requeued(workspace):
+    store, account, pid = workspace
+    payload = {'action': 'project_understanding', 'project_id': pid, 'analysis_mode': 'imported'}
+    first = jobs.enqueue(store, account, payload, as_of=STAMP)
+    store.put('recommendation_job', first['job_id'], {**first, 'status':'processing'})
+    jobs.reconcile_interrupted(store)
+    assert store.get('recommendation_job', first['job_id'])['reason'] == 'interrupted'
+    resumed = jobs.enqueue(store, account, payload, as_of=STAMP)
+    assert resumed['status'] == 'queued' and resumed['job_id'] != first['job_id']
+
+
 @pytest.mark.parametrize('mail_pref, outcome', [
     ('on', 'report'), ('off', 'report'), ('disabled_after_queue', 'report'), ('on', 'no_update'),
 ])

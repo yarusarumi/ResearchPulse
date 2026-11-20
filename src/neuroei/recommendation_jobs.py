@@ -332,6 +332,9 @@ def enqueue(store, account, payload, *, as_of=None, resume_feishu_job=None, sche
                     key = sha256((key+':continue-feishu-attachments').encode()).hexdigest()[:32]
                 elif prior['status'] == 'canceled':
                     key = sha256((key+':restart-stopped-analysis').encode()).hexdigest()[:32]
+                elif (prior['status'] == 'failed' and prior['reason'] == 'interrupted'
+                      and snapshot['analysis_mode'] == 'imported'):
+                    key = sha256((key+':resume-interrupted-import').encode()).hexdigest()[:32]
                 elif prior['status'] == 'partial' and prior['snapshot'].get('image_analysis_pending'):
                     key = sha256((key+':continue-image-analysis').encode()).hexdigest()[:32]
                 elif (prior['status'] == 'partial' and prior['snapshot'].get('batch_gaps')
