@@ -1889,6 +1889,7 @@ function projectWorkHTML(project, today, todayEvents, previous, reviewMarkup="",
         </details>` : '';
     const setupStatusLine = setup?.snapshot?.analysis_mode === 'imported' && setup.reason === 'awaiting_review' ? '' : jobLine(setupResolved ? null : setup);
     const setupBody = `${setupStatusLine}
+        ${hasJournals && desktopWorkerStarting() ? '<p class="reading-scope" role="status">正在准备分析服务，就绪后可开始分析。</p>' : ''}
         ${setup?.snapshot.project_brief_status && !['current','updated','no_evidence','canceled'].includes(setup.snapshot.project_brief_status) ? '<p>日报分析已保留，背景综合未完成。可以再次更新项目背景。</p>' : ''}
         ${!hasJournals ? `<p>${feishuFoldersEnabled ? '连接飞书日报后，就可以生成项目背景。' : '研究台尚未配置飞书日报接入。'}</p>` : ''}
         <div class="job-actions">
@@ -2654,6 +2655,9 @@ function jobsHTML(includeProjectFlow=false) {
     ).join('');
 }
 let pollTimer, loadRevision = 0, workbenchState;
+function desktopWorkerStarting(state = worker) {
+    return state.desktop && state.model_configured && state.status !== 'ready';
+}
 function updateJobProgress() {
     const progressByJob = new Map(jobs.map(job => [job.job_id, job.progress]));
     document.querySelectorAll('[data-job-progress]').forEach(node => {
@@ -2767,19 +2771,22 @@ document.addEventListener('touchend', event => {
     if (Math.abs(dx) < 42 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
     setPaperCarouselIndex(carousel, Number(carousel.dataset.carouselIndex || 0) + (dx < 0 ? 1 : -1));
 }, {passive:true});
-async function load({poll=false} = {}) {
+async function load({poll=false, checkWorker=false} = {}) {
     const revision = ++loadRevision;
     clearTimeout(pollTimer);
-    $('retry').hidden = true;
-    $('main').setAttribute('aria-busy','true');
     try {
+        const checkedQueue = checkWorker ? await api('/api/recommendation-jobs') : null;
+        if (revision !== loadRevision) return false;
+        if (checkedQueue && desktopWorkerStarting(checkedQueue.worker)) return true;
+        $('retry').hidden = true;
+        $('main').setAttribute('aria-busy','true');
         const account = await api('/api/me');
         const workspace = await api('/api/research-workspace');
         const eventList = await api('/api/recommendation-events');
         const sources = await api('/api/source-capabilities');
         const directions = await api('/api/directions');
         const deliveryList = await api('/api/recommendation-deliveries');
-        const queue = await api('/api/recommendation-jobs');
+        const queue = checkedQueue ?? await api('/api/recommendation-jobs');
         if (revision !== loadRevision) return false;
         const nextState = JSON.stringify([account, workspace, eventList, sources, directions, deliveryList,
             queue.worker, queue.jobs.map(({progress, ...job}) => job)]);
@@ -2834,7 +2841,11 @@ async function load({poll=false} = {}) {
     } finally {
         if (revision === loadRevision) {
             $('main').setAttribute('aria-busy','false');
-            if (jobs.some(job => activeJob(job) || (job.status === 'canceled' && job.started_at && !job.ended_at))) pollTimer = setTimeout(() => load({poll:true}),3000);
+            if (jobs.some(job => activeJob(job) || (job.status === 'canceled' && job.started_at && !job.ended_at))) {
+                pollTimer = setTimeout(() => load({poll:true}), 3000);
+            } else if (desktopWorkerStarting()) {
+                pollTimer = setTimeout(() => load({poll:true, checkWorker:true}), 3000);
+            }
         }
     }
 }

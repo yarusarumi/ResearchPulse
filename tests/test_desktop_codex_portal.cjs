@@ -1,6 +1,52 @@
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 
+async function checkWorkerStartup(page, url) {
+    let ready = false;
+    let workspaceReads = 0;
+    let submitted = 0;
+    const workspacePath = '**/api/research-workspace';
+    const jobsPath = '**/api/recommendation-jobs';
+    const stamp = '2026-11-20T01:00:00+00:00';
+    const project = {project_id:'startup-project', title:'本机启动验收', initialized:false, summary:[],
+        journals:[{journal_id:'local-journal', title:'测试日报', record_date:'2026-11-20'}]};
+    const canceled = {job_id:'stopped-before-restart', action:'project_understanding',
+        snapshot:{project_id:project.project_id, analysis_mode:'imported'}, status:'canceled',
+        reason:'canceled_by_user', created_at:stamp, started_at:stamp, ended_at:stamp};
+    const watchSubmissions = request => {
+        if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/recommendation-job') submitted++;
+    };
+    page.on('request', watchSubmissions);
+    await page.route(workspacePath, route => {
+        workspaceReads++;
+        return route.fulfill({json:{projects:[project], feishu_folders_enabled:false}});
+    });
+    await page.route(jobsPath, route => route.fulfill({json:{jobs:[canceled], worker:{
+        desktop:true, model_configured:true, status:ready?'ready':'unconfigured', understanding_enabled:ready,
+    }}}));
+    try {
+        await page.goto(url);
+        const generate = page.getByRole('button', {name:'生成项目背景', exact:true});
+        await generate.waitFor();
+        assert.equal(await generate.isDisabled(), true);
+        const preparing = page.getByText('正在准备分析服务，就绪后可开始分析。', {exact:true});
+        await preparing.waitFor();
+        await page.waitForResponse(response => new URL(response.url()).pathname === '/api/recommendation-jobs');
+        assert.equal(workspaceReads, 1);
+        ready = true;
+        await page.waitForFunction(() => {
+            const button = document.querySelector('button[data-action="project_understanding"][data-analysis-mode="imported"]');
+            return button && !button.disabled;
+        }, null, {timeout:12000});
+        await preparing.waitFor({state:'detached'});
+        assert.equal(submitted, 0);
+    } finally {
+        page.off('request', watchSubmissions);
+        await page.unroute(workspacePath);
+        await page.unroute(jobsPath);
+    }
+}
+
 async function run() {
     const browser = await chromium.launch({channel:process.env.NEUROEI_BROWSER_CHANNEL || 'msedge'});
     try {
@@ -8,7 +54,7 @@ async function run() {
         await page.route('**/api/desktop/codex/models', route => route.fulfill({
             json: {installed:true, signed_in:false, models:[]}
         }), {times:1});
-        await page.goto(process.argv[2]);
+        await checkWorkerStartup(page, process.argv[2]);
         await page.getByRole('link', {name:'模型设置', exact:true}).click();
         await page.getByText(/研究台后台仍在使用旧版/).waitFor();
         await page.getByRole('button', {name:'刷新模型列表', exact:true}).click();
