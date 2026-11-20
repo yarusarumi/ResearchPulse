@@ -38,10 +38,22 @@ button.primary:hover:not(:disabled){background:#115852}
 .direction-runs>.panel{padding:16px;margin:0}
 .direction-card .event{padding:14px;margin:12px 0 0}
 .job-stop{border:0;background:none;color:var(--muted);font:inherit;text-decoration:underline;cursor:pointer;padding:2px 0;margin-left:8px}.job-stop:hover{color:var(--warn)}.job-status{padding:8px 12px;background:var(--soft);border-radius:6px}
-.task-progress{display:grid;gap:5px;margin:0 0 14px}
-.task-progress p{margin:0;overflow-wrap:anywhere}
-.task-progress-caption{display:flex;justify-content:space-between;gap:12px;font-size:13px}
-.task-progress progress{display:block;width:100%;height:10px;accent-color:var(--accent)}
+.task-progress{display:grid;gap:10px;margin:8px 0 14px;padding:12px 15px;background:linear-gradient(120deg,#eff8f5,#fbfdfc 72%);border:1px solid #d8e8e2;border-radius:10px}
+.task-progress-caption{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 16px;min-width:0}
+.task-progress-stage{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:650}
+.task-progress-stage::before{content:'';flex:none;width:7px;height:7px;border-radius:50%;background:#218271;box-shadow:0 0 0 3px #dceee8}
+.task-progress-count{color:#205a50;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.task-progress-track{height:8px;overflow:hidden;border-radius:999px;background:#dceae5}
+.task-progress-track::before{content:'';display:block;height:100%;width:var(--task-progress-value,0%);border-radius:inherit;background:linear-gradient(90deg,#167468,#42a58d);transition:width .35s ease-out}
+.task-progress[data-state="running"] .task-progress-track::before{width:30%;animation:task-progress-sweep 2s ease-in-out infinite;transition:none}
+.task-progress[data-state="waiting"] .task-progress-track::before{display:none}
+.task-progress[data-state="waiting"] .task-progress-stage::before{background:#677983;box-shadow:0 0 0 3px #e6edef}
+.task-progress .task-progress-note{margin:0;font-size:12px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+@keyframes task-progress-sweep{from{transform:translateX(-100%)}to{transform:translateX(334%)}}
+@media(prefers-reduced-motion:reduce){
+    .task-progress-track::before{transition:none}
+    .task-progress[data-state="running"] .task-progress-track::before{animation:none;transform:translateX(117%)}
+}
 .paper-card>h3{font-size:1.08rem;line-height:1.45;overflow-wrap:anywhere}
 .paper-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:12px 20px;background:#f4f8f7;border-radius:8px;padding:13px 16px;margin:12px 0;overflow-wrap:anywhere}
 .paper-facts dt{font-size:12px;color:var(--muted)}
@@ -702,6 +714,7 @@ function jobStatus(job, fallback) {
         scheduled_window_superseded:'项目背景已更新，跳过较早的定时检查',
         source_failed:'无法读取日报，请重新授权或检查本人文档权限',
         no_update:'昨日没有待分析的新增或更新日报', no_new_or_updated_journals_in_window:'昨日没有待分析的新增或更新日报',
+        updated_without_actionable_need:job.snapshot?.analysis_mode==='manual'?'所选段落已分析，未生成可用于检索的研究问题':'',
         automation_disabled:'项目已关闭自动检测',
         no_imported_update:'资料没有变化',
         model_budget_insufficient:'这批日报一次处理不完', model_context_budget_exceeded:'项目资料太长，未能完成分析',
@@ -729,8 +742,7 @@ function jobStatus(job, fallback) {
     }
     return status + (reasons[job.reason] ? ' · ' + reasons[job.reason] : '');
 }
-function taskProgressHTML(progress, jobId) {
-    if (!progress) return '';
+function taskProgressDetails(progress) {
     const stage = {
         queued:'等待开始', preparing:'准备处理', confirming_daily_scope:'核对日报日期', searching:'检索论文来源', searching_wechat:'检索公众号文章',
         planning_followup_search:'根据初选结果补充检索词',
@@ -748,19 +760,30 @@ function taskProgressHTML(progress, jobId) {
     const elapsed = progress.elapsed_minutes===undefined?'':progress.elapsed_minutes===0?
         '已运行不到 1 分钟':'已运行 '+progress.elapsed_minutes+' 分钟';
     const unit = {searching:'组检索',reading_journal_images:'张图片',analyzing_journals:'批资料',reading:'篇论文'}[progress.stage];
-    const counted = unit && progress.total > 0;
-    const count = counted ? `已处理 ${progress.done} / ${progress.total} ${unit}` :
+    const counted = unit && Number.isInteger(progress.done) && Number.isInteger(progress.total) && progress.total > 0;
+    const done = counted ? Math.max(0, Math.min(progress.done, progress.total)) : 0;
+    const count = counted ? `已处理 ${done} / ${progress.total} ${unit}` :
         progress.stage==='ranking' && progress.candidates ? `${progress.candidates} 篇候选` : '';
+    const waiting = progress.stage==='queued' || progress.eta_status==='worker_unavailable';
+    const value = counted ? Math.round(done * 1000 / progress.total) / 10 : null;
     const active = [progress.stage==='analyzing_journals' && counted && progress.done<progress.total ?
         '正在分析第 '+(progress.done+1)+' 批' : '',
         progress.stage==='searching' && progress.source ? '当前：'+sourceName(progress.source) : '',
         progress.stage==='reading_journal_images' && progress.document ? progress.document : '',
         progress.stage==='reading_journal_images' && progress.reused>0 ? '已复用缓存 '+progress.reused+' 张' : '',
         progress.checkpoint_minutes>=1 ? '最近进展记录 '+progress.checkpoint_minutes+' 分钟前' : ''].filter(Boolean).join(' · ');
-    return `<div class="task-progress" data-job-progress="${escape(jobId)}">
-        <p class="task-progress-caption"><span>${escape(stage||'正在处理')}</span>${count?'<strong>'+escape(count)+'</strong>':''}</p>
-        ${counted ? `<progress max="${progress.total}" value="${progress.done}" aria-label="${escape(stage)}"></progress>` : ''}
-        <p class="reading-scope">${escape([active,elapsed,estimate].filter(Boolean).join(' · '))}</p>
+    return {title:stage || '正在处理', count, note:[active,elapsed,estimate].filter(Boolean).join(' · '),
+        state:counted ? 'counted' : waiting ? 'waiting' : 'running', value};
+}
+function taskProgressHTML(progress, jobId) {
+    if (!progress) return '';
+    const {title, count, note, state, value} = taskProgressDetails(progress);
+    const position = value === null ? '' :
+        ` aria-valuenow="${value}" aria-valuetext="${escape(count)}" style="--task-progress-value:${value}%"`;
+    return `<div class="task-progress" data-job-progress="${escape(jobId)}" data-state="${state}">
+        <div class="task-progress-caption"><span class="task-progress-stage">${escape(title)}</span><span class="task-progress-count"${count?'':' hidden'}>${escape(count)}</span></div>
+        <div class="task-progress-track" role="progressbar" aria-label="${escape(title)}"${position}></div>
+        <p class="task-progress-note"${note?'':' hidden'}>${escape(note)}</p>
     </div>`;
 }
 function directionNeedsSetup(config) { return !config.questions?.length || !config.public_queries?.length; }
@@ -1861,6 +1884,7 @@ function projectWorkHTML(project, today, todayEvents, previous, reviewMarkup="",
         searchedToday ? '本次论文推荐未完成。' :
         reviewJob?.status==='failed' ? '本次日报分析失败，尚未开始检索。' :
         reviewJob?.status==='skipped' ? '本次检查已跳过推荐。' :
+        reviewJob?.reason==='updated_without_actionable_need' && !pendingReview ? '本次分析未生成研究问题，尚未开始检索。' :
         '确认研究问题后，系统会检索论文并尝试深读。';
     const jobLine = job => job ? `<p class="job-status">${escape(jobStatus(job))}${jobStopHTML(job)}</p>${taskProgressHTML(job.progress, job.job_id)}` : '';
     const inlineReviewMarkup = reviewMarkup || deliveryHTML(id);
@@ -2670,9 +2694,29 @@ function desktopWorkerStarting(state = worker) {
 function updateJobProgress() {
     const progressByJob = new Map(jobs.map(job => [job.job_id, job.progress]));
     document.querySelectorAll('[data-job-progress]').forEach(node => {
-        const id = node.dataset.jobProgress;
-        const html = taskProgressHTML(progressByJob.get(id), id);
-        if (html && node.outerHTML !== html) node.outerHTML = html;
+        const progress = progressByJob.get(node.dataset.jobProgress);
+        if (!progress) return;
+        const {title, count, note, state, value} = taskProgressDetails(progress);
+        const track = node.querySelector('.task-progress-track');
+        const caption = node.querySelector('.task-progress-stage');
+        const tally = node.querySelector('.task-progress-count');
+        const detail = node.querySelector('.task-progress-note');
+        if (caption.textContent !== title) caption.textContent = title;
+        if (tally.textContent !== count) tally.textContent = count;
+        if (detail.textContent !== note) detail.textContent = note;
+        tally.hidden = !count;
+        detail.hidden = !note;
+        node.dataset.state = state;
+        track.setAttribute('aria-label', title);
+        if (value === null) {
+            track.removeAttribute('aria-valuenow');
+            track.removeAttribute('aria-valuetext');
+            track.style.removeProperty('--task-progress-value');
+        } else {
+            track.setAttribute('aria-valuenow', value);
+            track.setAttribute('aria-valuetext', count);
+            track.style.setProperty('--task-progress-value', value+'%');
+        }
     });
 }
 function disclosureKey(detail) {

@@ -66,6 +66,48 @@ async function checkWorkerStartup(page, url) {
     }
 }
 
+async function checkProgressUpdates(page) {
+    const jobsPath = '**/api/recommendation-jobs';
+    const workspacePath = '**/api/research-workspace';
+    const project = {project_id:'progress-project', title:'进度显示验收', initialized:true, summary:[],
+        feishu:{url:'https://example.feishu.cn/drive/folder/journals'}, journals:[]};
+    const stamp = new Date().toISOString();
+    const job = {job_id:'manual-progress', action:'project_understanding', status:'processing', reason:null,
+        snapshot:{project_id:project.project_id, analysis_mode:'manual'}, created_at:stamp, started_at:stamp,
+        progress:{stage:'reading_journals', elapsed_minutes:0}};
+    await page.route(workspacePath, route => route.fulfill({json:{projects:[project], feishu_folders_enabled:true}}));
+    await page.route(jobsPath, route => route.fulfill({json:{jobs:[job], worker:{
+        desktop:true, model_configured:true, status:'ready', understanding_enabled:true, recommendations_enabled:true,
+    }}}));
+    try {
+        await page.reload();
+        await page.locator('#project').selectOption(project.project_id);
+        const component = page.locator('[data-job-progress="manual-progress"]');
+        const track = component.getByRole('progressbar');
+        await track.waitFor();
+        assert.equal(await component.getAttribute('data-state'), 'running');
+        assert.equal(await track.getAttribute('aria-valuenow'), null);
+        await track.evaluate(element => { element.dataset.originalTrack = 'yes'; });
+        job.progress = {stage:'reading_journal_images', done:42, total:227, elapsed_minutes:2,
+            document:'机械臂日报', reused:21};
+        await component.getByText('已处理 42 / 227 张图片', {exact:true}).waitFor();
+        assert.equal(await component.getAttribute('data-state'), 'counted');
+        assert.equal(await track.getAttribute('data-original-track'), 'yes');
+        assert.equal(await track.getAttribute('aria-valuenow'), '18.5');
+        assert.equal(await track.getAttribute('aria-valuetext'), '已处理 42 / 227 张图片');
+        assert.equal(await track.evaluate(element => getComputedStyle(element, '::before').transitionProperty), 'width');
+        await component.getByText(/机械臂日报 · 已复用缓存 21 张 · 已运行 2 分钟/).waitFor();
+        job.status = 'completed';
+        job.reason = 'updated_without_actionable_need';
+        delete job.progress;
+        await page.locator('#project-work').getByText(/所选段落已分析，未生成可用于检索的研究问题/).waitFor();
+        await component.waitFor({state:'detached'});
+    } finally {
+        await page.unroute(workspacePath);
+        await page.unroute(jobsPath);
+    }
+}
+
 async function run() {
     const browser = await chromium.launch({channel:process.env.NEUROEI_BROWSER_CHANNEL || 'msedge'});
     try {
@@ -74,6 +116,7 @@ async function run() {
             json: {installed:true, signed_in:false, models:[]}
         }), {times:1});
         await checkWorkerStartup(page, process.argv[2]);
+        await checkProgressUpdates(page);
         await page.getByRole('link', {name:'模型设置', exact:true}).click();
         await page.getByText(/研究台后台仍在使用旧版/).waitFor();
         await page.getByRole('button', {name:'刷新模型列表', exact:true}).click();
