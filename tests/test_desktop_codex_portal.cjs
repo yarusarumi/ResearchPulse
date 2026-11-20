@@ -3,10 +3,12 @@ const {chromium} = require('playwright');
 
 async function checkWorkerStartup(page, url) {
     let ready = false;
+    let dailyFailed = false;
     let workspaceReads = 0;
     let submitted = 0;
     const workspacePath = '**/api/research-workspace';
     const jobsPath = '**/api/recommendation-jobs';
+    const deliveryPath = '**/api/recommendation-deliveries';
     const stamp = '2026-11-20T01:00:00+00:00';
     const project = {project_id:'startup-project', title:'本机启动验收', initialized:false, summary:[],
         journals:[{journal_id:'local-journal', title:'测试日报', record_date:'2026-11-20'}]};
@@ -21,9 +23,16 @@ async function checkWorkerStartup(page, url) {
         workspaceReads++;
         return route.fulfill({json:{projects:[project], feishu_folders_enabled:false}});
     });
-    await page.route(jobsPath, route => route.fulfill({json:{jobs:[canceled], worker:{
-        desktop:true, model_configured:true, status:ready?'ready':'unconfigured', understanding_enabled:ready,
+    const failureStamp = new Date().toISOString();
+    const failed = {...canceled, job_id:'daily-failed', snapshot:{...canceled.snapshot, analysis_mode:'daily'},
+        status:'failed', reason:'worker_failed', created_at:failureStamp, started_at:failureStamp, ended_at:failureStamp};
+    await page.route(jobsPath, route => route.fulfill({json:{jobs:dailyFailed?[failed,canceled]:[canceled], worker:{
+        desktop:true, model_configured:true, status:ready?'ready':'starting', understanding_enabled:ready,
     }}}));
+    await page.route(deliveryPath, route => route.fulfill({json:{deliveries:dailyFailed?[{
+        project_id:project.project_id, status:'awaiting_review', request_id:'imported-delivery',
+        received_at:stamp, trigger_details:{selection:'explicit_import'},
+    }]:[]}}));
     try {
         await page.goto(url);
         const generate = page.getByRole('button', {name:'生成项目背景', exact:true});
@@ -31,6 +40,7 @@ async function checkWorkerStartup(page, url) {
         assert.equal(await generate.isDisabled(), true);
         const preparing = page.getByText('正在准备分析服务，就绪后可开始分析。', {exact:true});
         await preparing.waitFor();
+        assert.equal(await page.getByText('项目分析暂不可用，请稍后刷新。', {exact:true}).count(), 0);
         await page.waitForResponse(response => new URL(response.url()).pathname === '/api/recommendation-jobs');
         assert.equal(workspaceReads, 1);
         ready = true;
@@ -40,10 +50,19 @@ async function checkWorkerStartup(page, url) {
         }, null, {timeout:12000});
         await preparing.waitFor({state:'detached'});
         assert.equal(submitted, 0);
+        dailyFailed = true;
+        project.initialized = true;
+        project.feishu = {url:'https://example.feishu.cn/drive/folder/journals'};
+        await page.reload();
+        await page.locator('#project-work').getByText(/运行失败 · 本机后台遇到异常/).waitFor();
+        await page.getByText(/首次分析已纳入项目背景的日报时，请用「手动选择段落」/).waitFor();
+        assert.equal(await page.getByText(/下方待确认的问题来自/).count(), 0);
+        assert.equal(await page.getByRole('button', {name:/研究问题确认/}).count(), 0);
     } finally {
         page.off('request', watchSubmissions);
         await page.unroute(workspacePath);
         await page.unroute(jobsPath);
+        await page.unroute(deliveryPath);
     }
 }
 

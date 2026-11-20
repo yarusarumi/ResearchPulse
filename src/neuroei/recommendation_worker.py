@@ -297,6 +297,19 @@ def execute_understanding(store, job, account, *, max_calls, should_stop=None):
     manual_selection = snapshot.get('manual_selection') if snapshot.get('analysis_mode') == 'manual' else None
     head = identity([account['user_id'], snapshot['project_id']])
     pointer = dict(store.items('understanding_head')).get(head)
+    if snapshot.get('scheduled_project_daily') and snapshot.get('analysis_mode') == 'daily' and 'analysis_as_of' not in snapshot:
+        # Keep the scheduled Beijing date, but use the actual observation time for a catch-up within that day.
+        slot = datetime.fromisoformat(analysis_as_of).astimezone(TZ)
+        day_end = (slot + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        observed = datetime.fromisoformat(job['started_at'])
+        if pointer:
+            baseline = datetime.fromisoformat(store.get('understanding_state', pointer['key'])['as_of'])
+            if baseline >= day_end:
+                return {'user_id': account['user_id'], 'event_id': None,
+                        'status': 'skipped', 'reason': 'scheduled_window_superseded'}
+            observed = max(observed, baseline)
+        analysis_as_of = max(slot, min(observed, day_end - timedelta(microseconds=1))).astimezone(TZ).isoformat()
+        snapshot['analysis_as_of'] = analysis_as_of
     background_record = snapshot['background']
     background_changed = False
     if background_record and snapshot.get('analysis_mode') == 'imported' and snapshot.get('background_edited'):

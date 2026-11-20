@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from . import accounts
 from .models import now
 from .recommendation_jobs import enqueue
+from .research_workspace import daily_enabled_on
 from .store import Store
 
 TZ = ZoneInfo("Asia/Shanghai")
@@ -17,6 +18,7 @@ TZ = ZoneInfo("Asia/Shanghai")
 def run(store, *, submit=True, as_of=None, project_id=None, email=True):
     """Use project mail preferences in the desktop scheduler (email=None)."""
     stamp = as_of or now()
+    target_day = datetime.fromisoformat(stamp).astimezone(TZ).date().isoformat()
     rows = []
     from .project_daily_email import retry_pending
 
@@ -25,7 +27,7 @@ def run(store, *, submit=True, as_of=None, project_id=None, email=True):
         automation = project.get("automation") or {}
         if project_id is not None and project["project_id"] != project_id:
             continue
-        if project_id is None and not automation.get("daily_enabled"):
+        if project_id is None and not daily_enabled_on(automation, target_day):
             continue
         owner = accounts.find(store, project.get("owner_id"))
         row = {"project_id": project.get("project_id"), "title": project.get("title", "")}
@@ -37,7 +39,6 @@ def run(store, *, submit=True, as_of=None, project_id=None, email=True):
             row["reason"] = "feishu_not_configured"
             rows.append(row)
             continue
-        target_day = datetime.fromisoformat(stamp).astimezone(TZ).date().isoformat()
         prior = next((job for job in store.list("recommendation_job")
                       if job.get("user_id") == owner["user_id"]
                       and job.get("action") == "project_understanding"

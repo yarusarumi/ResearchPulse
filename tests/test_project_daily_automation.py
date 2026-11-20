@@ -11,7 +11,7 @@ from neuroei import recommendation_jobs as jobs
 from neuroei.project_understanding import JournalBatch, identity
 from neuroei.recommendation_handoff import dispatch_reviewed
 from neuroei.recommendation_pipeline import progress
-from neuroei.recommendation_worker import execution
+from neuroei.recommendation_worker import execute_understanding, execution
 from neuroei.research_workspace import create_project, update_project_automation
 from neuroei.store import Store
 from test_recommendation_events import empty, request
@@ -32,7 +32,9 @@ def workspace(tmp_path, monkeypatch):
             'url': 'https://example.feishu.cn/drive/folder/journal', 'selection': [],
         }})
         store.put('understanding_head', identity([account['user_id'], pid]), {'key': 'initialized'})
-        update_project_automation(store, account, {'project_id': pid, 'enabled': True})
+        with monkeypatch.context() as clock:
+            clock.setattr('neuroei.research_workspace.now', lambda: '2026-11-18T12:00:00+08:00')
+            update_project_automation(store, account, {'project_id': pid, 'enabled': True})
         yield store, account, pid
 
 
@@ -52,6 +54,29 @@ def mailbox(monkeypatch):
 
 def schedule(store, stamp=STAMP, **options):
     return project_daily_schedule.run(store, as_of=stamp, **options)['projects'][0]
+
+
+def test_enable_schedule_starts_the_following_beijing_day(workspace, monkeypatch):
+    store, account, pid = workspace
+    payload = {'project_id': pid}
+    # Still November 18 in UTC, already November 19 in Beijing.
+    monkeypatch.setattr('neuroei.research_workspace.now', lambda: '2026-11-18T18:30:00+00:00')
+    already_queued = schedule(store, email=False)
+    update_project_automation(store, account, {**payload, 'enabled': False})
+    enabled = update_project_automation(store, account, {**payload, 'enabled': True})['automation']
+    assert enabled['daily_start_date'] == '2026-11-20'
+    assert project_daily_schedule.run(store, as_of=STAMP, email=False)['projects'] == []
+    assert not jobs.automatic_project_enabled(store, store.get('recommendation_job', already_queued['job_id']))
+    manual = jobs.enqueue(store, account,
+                          {'action': 'project_understanding', 'project_id': pid, 'analysis_mode': 'daily'},
+                          as_of=STAMP)
+    assert manual['job_id'] != already_queued['job_id']
+    assert not store.get('recommendation_job', manual['job_id'])['snapshot'].get('scheduled_project_daily')
+    monkeypatch.setattr('neuroei.research_workspace.now', lambda: '2026-11-20T06:00:00+08:00')
+    assert update_project_automation(store, account, {**payload, 'email_enabled': True})['automation']['daily_start_date'] == '2026-11-20'
+    assert update_project_automation(store, account, {**payload, 'enabled': True})['automation']['daily_start_date'] == '2026-11-20'
+    due = schedule(store, stamp='2026-11-20T05:00:00+08:00', email=False)
+    assert jobs.automatic_project_enabled(store, store.get('recommendation_job', due['job_id']))
 
 
 def delivery(store, account, project):
@@ -126,6 +151,45 @@ def test_schedule_recovers_only_the_current_daily_window(workspace, monkeypatch)
     result = progress(store, batch, extractor=None, sources=None, user_id=account['user_id'], project_id=pid,
                       projects=[pid], as_of=STAMP, delivery_window_end=date(2026, 11, 19))
     assert result['review_required'] and result['deliveries'] == pending[-1:]
+
+
+@pytest.mark.parametrize(('started', 'baseline', 'cutoff'), [
+    ('2026-11-19T11:00:00+08:00', '2026-11-19T09:58:00+08:00', '2026-11-19T11:00:00+08:00'),
+    ('2026-11-20T03:00:00+08:00', '2026-11-19T09:58:00+08:00', '2026-11-19T23:59:59.999999+08:00'),
+    ('2026-11-20T03:00:00+08:00', '2026-11-20T02:00:00+08:00', None),
+])
+def test_scheduled_catchup_after_newer_background_keeps_original_date(workspace, monkeypatch, started, baseline, cutoff):
+    store, account, pid = workspace
+    store.put('understanding_state', 'initialized', {
+        'version': 'initialized', 'as_of': baseline, 'items': [], 'sources': {}, 'superseded_ids': [],
+    })
+    times, days = [], []
+
+    def read_folder(store, account, project, binding, manifest, as_of, **kwargs):
+        times.append(as_of)
+        return {'records': [{'user_id': account['user_id'], 'project_id': project, 'source_id': 'feishu:journal',
+            'available_at': as_of, 'synced_at': as_of, 'record_date': '2026-11-18',
+            'blocks': [{'document_id': 'journal', 'block_id': 'block', 'text': 'Synthetic journal', 'revision': '1'}]}],
+            'source_runs': [{'source_id': 'feishu-folder:journal', 'status': 'read'}], 'warnings': []}
+
+    def select_day(records, previous, day, manifest, *, review):
+        assert records
+        days.append(day)
+        return [], [], {}, []
+
+    monkeypatch.setattr('neuroei.feishu_folders.folder_batch', read_folder)
+    monkeypatch.setattr('neuroei.feishu_folders.daily_model_records', select_day)
+    scheduled = schedule(store, email=False)
+    monkeypatch.setattr(jobs, 'now', lambda: started)
+    finished = jobs.process_one(store, execute=lambda job, owner: execute_understanding(store, job, owner, max_calls=0))
+    assert finished['job_id'] == scheduled['job_id'] and finished['status'] == 'skipped'
+    if cutoff:
+        assert times == [cutoff] and days == [date(2026, 11, 18)]
+        assert finished['snapshot']['analysis_as_of'] == cutoff
+        assert store.get('recommendation_event', finished['event_id'])['date'] == '2026-11-19'
+    else:
+        assert finished['reason'] == 'scheduled_window_superseded'
+        assert not times and not days
 
 
 def test_local_schedule_selects_all_questions_without_sending_email(workspace, mailbox):

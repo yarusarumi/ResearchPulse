@@ -19,6 +19,7 @@ from cryptography.fernet import Fernet
 
 from . import accounts, desktop_models
 from .feishu_user_auth import DESKTOP_ORIGIN
+from .models import now
 from .portal import make_server
 from .store import Store
 
@@ -184,6 +185,7 @@ def main(argv=None):
         with server:
             desktop.initialize(store)
             desktop.prepare()
+            store.put('recommendation_worker', 'current', {'status': 'starting', 'updated_at': now()})
             threading.Thread(target=desktop.worker, args=(shutdown,), daemon=True, name='research-worker').start()
             threading.Thread(target=desktop.scheduler, args=(shutdown,), daemon=True, name='daily-scheduler').start()
             print(f'ResearchPulse {desktop.origin} | {desktop.profile}', flush=True)

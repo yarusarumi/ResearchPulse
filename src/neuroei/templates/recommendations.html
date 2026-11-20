@@ -698,9 +698,10 @@ function jobStatus(job, fallback) {
         ? '正在停止 · 等待当前步骤结束' : '已停止，保留已有结果';
     const reasons = {
         model_output_truncated:'结果不完整，可以重试', interrupted:'处理已中断',
-        access_denied:'访问权限已变更', worker_failed:'请联系管理员',
+        access_denied:'访问权限已变更', worker_failed:worker.desktop?'本机后台遇到异常':'请联系管理员',
+        scheduled_window_superseded:'项目背景已更新，跳过较早的定时检查',
         source_failed:'无法读取日报，请重新授权或检查本人文档权限',
-        no_update:'昨日没有新增或更新的日报', no_new_or_updated_journals_in_window:'昨日没有新增或更新的日报',
+        no_update:'昨日没有待分析的新增或更新日报', no_new_or_updated_journals_in_window:'昨日没有待分析的新增或更新日报',
         automation_disabled:'项目已关闭自动检测',
         no_imported_update:'资料没有变化',
         model_budget_insufficient:'这批日报一次处理不完', model_context_budget_exceeded:'项目资料太长，未能完成分析',
@@ -741,7 +742,8 @@ function taskProgressHTML(progress, jobId) {
     const range = progress.eta_minutes;
     const estimate = {
         queued:'正在排队', variable_history:'用时波动较大，暂无法估算',
-        beyond_history:'已超过以往用时，暂无法估算', worker_unavailable:'处理服务暂不可用，请稍后查看'
+        beyond_history:'已超过以往用时，暂无法估算',
+        worker_unavailable:desktopWorkerStarting()?'等待本机分析服务启动':'处理服务暂不可用，请稍后查看'
     }[progress.eta_status] || (range ? '预计剩余约 '+(range[0]===range[1]?range[0]:range.join('–'))+' 分钟' : '');
     const elapsed = progress.elapsed_minutes===undefined?'':progress.elapsed_minutes===0?
         '已运行不到 1 分钟':'已运行 '+progress.elapsed_minutes+' 分钟';
@@ -1832,7 +1834,7 @@ function projectWorkHTML(project, today, todayEvents, previous, reviewMarkup="",
         && (activeJob(job) || beijingDate(job.created_at) === today));
     const pendingAnalysis = analysis && activeJob(analysis);
     const pendingRecommendation = recommendation && activeJob(recommendation);
-    const pendingReview = deliveries.filter(row => row.project_id === id && row.status === 'awaiting_review' &&
+    const pendingReview = deliveries.filter(row => visiblePendingReview(row, id) &&
         !jobs.some(job => job.action === 'progress' && job.snapshot.request_id === row.request_id))
         .sort((a,b)=>Date.parse(b.received_at)-Date.parse(a.received_at))[0];
     const earlierReview = pendingReview && analysis?.status === 'failed' &&
@@ -1867,7 +1869,10 @@ function projectWorkHTML(project, today, todayEvents, previous, reviewMarkup="",
     const reviewCard = inlineReviewMarkup ? `<button type="button" class="flow-operation-card" data-flow-card="review"><strong>研究问题确认</strong><small>查看日报分析提出的问题，选择需要检索的内容</small></button>` : '';
     const papersCard = (inlineTodayMarkup || inlinePreviousMarkup) ? `<button type="button" class="flow-operation-card" data-flow-card="papers"><strong>今日推荐与深读</strong><small>查看推荐论文、原文依据和深读内容</small></button>` : '';
     const automation = project.automation || {daily_enabled:false, daily_hour:5, timezone:'Asia/Shanghai'};
-    const automationControl = `<label class="automation-setting"><input type="checkbox" data-auto-daily data-project="${escape(id)}" ${automation.daily_enabled?'checked':''}><span><strong>每天 5:00 自动检测</strong><small>${worker.desktop?'默认全选研究问题，结果保存在这台电脑。错过 5:00 时，下次启动会补检。':'默认全选日报生成的研究问题，完成推荐和深读后发送到注册邮箱。'}</small></span></label>`;
+    const firstCheck = automation.daily_enabled && automation.daily_start_date > today
+        ? `首次检查为 ${escape(automation.daily_start_date)} 05:00。 `
+        : (automation.daily_enabled ? '' : '开启后从次日开始。');
+    const automationControl = `<label class="automation-setting"><input type="checkbox" data-auto-daily data-project="${escape(id)}" ${automation.daily_enabled?'checked':''}><span><strong>每天 5:00 自动检测</strong><small>${firstCheck}${worker.desktop?'默认全选研究问题，结果保存在这台电脑。生效后错过 5:00 时，下次启动会补检。':'默认全选日报生成的研究问题，完成推荐和深读后发送到注册邮箱。'}</small></span></label>`;
     const emailControl = worker.desktop ? `<label class="automation-setting"><input type="checkbox" data-auto-email data-project="${escape(id)}" ${automation.email_enabled?'checked':''}><span><strong>完成后发送邮件</strong><small>自动检测完成推荐与深读后，发送完整报告到已配置的本机邮箱。</small></span></label>` : '';
 
 
@@ -1915,11 +1920,11 @@ function projectWorkHTML(project, today, todayEvents, previous, reviewMarkup="",
                 `<div class="job-actions"><button ${dailyCurrent?'class="primary" ':''}data-action="project_understanding" data-analysis-mode="daily"
                     data-project="${escape(id)}" aria-describedby="daily-analysis-scope" ${ready&&!pendingAnalysis?'':'disabled'}>分析昨日日报</button>
                     ${feishuFoldersEnabled && project.feishu ? `<button type="button" data-manual-journal data-project="${escape(id)}" ${ready?'':'disabled'}>手动选择段落</button>` : ''}</div>
-                    <p class="muted" id="daily-analysis-scope">整理北京时间昨天新增或更新的日报，生成待确认的研究问题。没有更新时跳过。</p>`}
+                    <p class="muted" id="daily-analysis-scope">整理北京时间昨天新增或更新的日报，生成待确认的研究问题。${project.feishu?'首次分析已纳入项目背景的日报时，请用「手动选择段落」选中对应日期的内容。':''}没有待分析的更新时跳过。</p>`}
             ${analysis===reviewJob ? retry + files : ''}
             ${earlierReview ? `<p class="workbench-message">下方待确认的问题来自 ${escape(reviewTime)} 的分析。</p>` : ''}
             ${reviewCard}
-            ${!ready ? '<p class="muted">项目分析暂不可用，请稍后刷新。</p>' : ''}
+            ${!ready && !desktopWorkerStarting() ? '<p class="muted">项目分析暂不可用，请稍后刷新。</p>' : ''}
         </section>
         <section class="flow-stage ${readingCurrent?'flow-current':''}" ${readingCurrent?'aria-current="step"':''}>
             <h3>3. 阅读推荐论文与深读建议</h3>
@@ -2568,8 +2573,12 @@ function reviewQuestionHTML(question, selected, pending, requestId) {
         ${pending?'disabled':''}>纳入本次检索</label>` : '';
     return `<li><h3>研究问题</h3><p class="review-question-prompt">${escape(parts.question)}</p>${followup}${choice}</li>`;
 }
+function visiblePendingReview(delivery, project) {
+    return delivery.status === 'awaiting_review' && delivery.trigger_details?.selection !== 'explicit_import'
+        && (!project || delivery.project_id === project);
+}
 function deliveryHTML(project='') {
-    const rows = deliveries.filter(d=>d.status==='awaiting_review'&&d.trigger_details?.selection!=='explicit_import'&&(!project||d.project_id===project))
+    const rows = deliveries.filter(d => visiblePendingReview(d, project))
         .sort((a,b)=>Date.parse(b.received_at||0)-Date.parse(a.received_at||0));
     const groups = new Map();
     rows.forEach(d=>{ if(!groups.has(d.project_id)) groups.set(d.project_id, []); groups.get(d.project_id).push(d); });
@@ -2656,7 +2665,7 @@ function jobsHTML(includeProjectFlow=false) {
 }
 let pollTimer, loadRevision = 0, workbenchState;
 function desktopWorkerStarting(state = worker) {
-    return state.desktop && state.model_configured && state.status !== 'ready';
+    return state.desktop && state.model_configured && ['starting','unconfigured'].includes(state.status);
 }
 function updateJobProgress() {
     const progressByJob = new Map(jobs.map(job => [job.job_id, job.progress]));
@@ -2777,7 +2786,9 @@ async function load({poll=false, checkWorker=false} = {}) {
     try {
         const checkedQueue = checkWorker ? await api('/api/recommendation-jobs') : null;
         if (revision !== loadRevision) return false;
-        if (checkedQueue && desktopWorkerStarting(checkedQueue.worker)) return true;
+        if (checkedQueue && checkedQueue.worker.status !== 'ready'
+                && checkedQueue.worker.status === worker.status
+                && checkedQueue.worker.model_configured === worker.model_configured) return true;
         $('retry').hidden = true;
         $('main').setAttribute('aria-busy','true');
         const account = await api('/api/me');
@@ -2813,7 +2824,7 @@ async function load({poll=false, checkWorker=false} = {}) {
         $('account').title = me.user.display_name || '';
         $('avatar').textContent = (accountName || '研').trim().slice(0, 1).toUpperCase();
         $('notice').textContent = worker.desktop && !worker.model_configured ? '请先打开「模型设置」，接通至少一个模型。' :
-            worker.desktop && !worker.recommendations_enabled ? '日报分析已可使用。推荐与深读请先安装 BGE-M3 并重启研究台。' : '';
+            worker.desktop && worker.status === 'ready' && !worker.recommendations_enabled ? '日报分析已可使用。推荐与深读请先安装 BGE-M3 并重启研究台。' : '';
         if(page==='reading')await fetchReadingData(false);
         renderPreservingReading();
         const returned = new URLSearchParams(location.search).get('feishu');
@@ -2843,7 +2854,7 @@ async function load({poll=false, checkWorker=false} = {}) {
             $('main').setAttribute('aria-busy','false');
             if (jobs.some(job => activeJob(job) || (job.status === 'canceled' && job.started_at && !job.ended_at))) {
                 pollTimer = setTimeout(() => load({poll:true}), 3000);
-            } else if (desktopWorkerStarting()) {
+            } else if (worker.desktop && worker.model_configured && worker.status !== 'ready') {
                 pollTimer = setTimeout(() => load({poll:true, checkWorker:true}), 3000);
             }
         }
@@ -2963,10 +2974,13 @@ $('content').addEventListener('change',async event=>{
     const email=checkbox.hasAttribute('data-auto-email');
     checkbox.disabled=true;
     try{
-        await api('/api/research-project-automation',{method:'POST',headers:{'Content-Type':'application/json','X-Review-Token':token},
+        const saved = await api('/api/research-project-automation',{method:'POST',headers:{'Content-Type':'application/json','X-Review-Token':token},
             body:JSON.stringify({project_id:checkbox.dataset.project,[email?'email_enabled':'enabled']:enabled})});
+        const project = researchProjects.find(row => row.project_id === saved.project_id);
+        if (project) project.automation = saved.automation;
+        const start = saved.automation?.daily_start_date;
         workbenchNotice(email ? (enabled?'已开启自动日报邮件。':'已关闭自动日报邮件。')
-            : (enabled?'已开启每天 5:00 自动检测。':'已关闭自动检测。'));
+            : (enabled?(start?`自动检测从 ${start} 05:00 开始（北京时间）。`:'已开启每天 5:00 自动检测。'):'已关闭自动检测。'));
     }catch(error){
         checkbox.checked=!enabled;
         workbenchNotice(error.message);

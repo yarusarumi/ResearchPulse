@@ -35,7 +35,8 @@ def worker_status(store):
     except ValueError:
         return {'status': 'unconfigured', 'paid_model_calls_enabled': False}
     age = (datetime.now(UTC) - datetime.fromisoformat(row['updated_at'])).total_seconds()
-    if row['status'] == 'ready' and not 0 <= age <= 20:
+    heartbeat_limit = {'ready': 20, 'starting': 300}.get(row['status'])
+    if heartbeat_limit is not None and not 0 <= age <= heartbeat_limit:
         return {**row, 'status': 'offline'}
     return row
 
@@ -136,7 +137,8 @@ def enqueue(store, account, payload, *, as_of=None, resume_feishu_job=None, sche
         if not run_id and previous['reason'] not in ('model_budget_insufficient', 'model_not_configured'):
             raise ValueError('请联系管理员核对这次分析的恢复条件。')
         snapshot = {**previous['snapshot'], 'retry_run_id': run_id, 'retry_job_id': previous['job_id'],
-                    'retry_phase': previous['understanding_phase'], 'analysis_as_of': previous['created_at']}
+                    'retry_phase': previous['understanding_phase'],
+                    'analysis_as_of': previous['snapshot'].get('analysis_as_of', previous['created_at'])}
         identity = [action, account['user_id'], previous['job_id']]
         if (budget := retry_call_limit(store, previous, worker_status(store))) is not None:
             snapshot['retry_call_limit'] = budget
@@ -313,6 +315,8 @@ def enqueue(store, account, payload, *, as_of=None, resume_feishu_job=None, sche
         raise ValueError('Unknown recommendation action')
     if scheduled_project_daily:
         snapshot['scheduled_project_daily'] = True
+        if action == 'project_understanding':
+            identity.append('scheduled-daily-observation-v1')
     key = sha256(json.dumps(identity).encode()).hexdigest()[:32]
     job = {'job_id': key, 'user_id': account['user_id'], 'action': action, 'snapshot': snapshot,
            'status': 'queued', 'created_at': created_at, 'queued_at': now(), 'event_id': None, 'reason': None}
@@ -534,8 +538,11 @@ def automatic_project_enabled(store, job):
     snapshot = job['snapshot']
     if not snapshot.get('scheduled_project_daily'):
         return True
+    from .research_workspace import daily_enabled_on
+
     rows = store.select('research_project', ('automation',), key=snapshot['project_id'], decode=('automation',))
-    return bool(rows and (rows[0]['automation'] or {}).get('daily_enabled'))
+    day = datetime.fromisoformat(job['created_at']).astimezone(ZoneInfo('Asia/Shanghai')).date().isoformat()
+    return bool(rows and daily_enabled_on(rows[0]['automation'] or {}, day))
 
 
 def _same_day_manual_request(store, job):

@@ -1,6 +1,6 @@
 """Account-scoped manual research inputs and snapshots for the existing worker."""
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from hashlib import sha256
 from typing import Annotated
 from uuid import uuid4
@@ -182,6 +182,10 @@ def update_feishu_source(store, account, payload):
     return {'project_id': data.project_id, 'feishu': binding}
 
 
+def daily_enabled_on(automation, scheduled_day):
+    return bool(automation.get('daily_enabled') and automation.get('daily_start_date', '') <= scheduled_day)
+
+
 def update_project_automation(store, account, payload):
     data = ProjectAutomationUpdate.model_validate(payload)
     project = project_for(store, account, data.project_id)
@@ -195,8 +199,14 @@ def update_project_automation(store, account, payload):
         row = db.execute("SELECT json_extract(body,'$.automation') FROM objects WHERE kind='research_project' AND id=?",
                          (data.project_id,)).fetchone()
         automation = json.loads(row[0]) if row[0] else {}
-        automation.update(daily_hour=5, timezone='Asia/Shanghai', updated_at=now())
+        stamp = now()
+        automation.update(daily_hour=5, timezone='Asia/Shanghai', updated_at=stamp)
         if data.enabled is not None:
+            if data.enabled and not automation.get('daily_enabled'):
+                local_day = datetime.fromisoformat(stamp).astimezone(TZ).date()
+                automation['daily_start_date'] = (local_day + timedelta(days=1)).isoformat()
+            elif not data.enabled:
+                automation.pop('daily_start_date', None)
             automation['daily_enabled'] = data.enabled
         if data.email_enabled is not None:
             automation['email_enabled'] = data.email_enabled
